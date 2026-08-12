@@ -1,0 +1,67 @@
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+@layer base {
+  :root {
+    --background: 240 5% 4%;      /* #09090b */
+    --foreground: 240 5% 96%;     /* zinc-50 */
+    --surface:    240 4% 8%;      /* #121214 */
+    --border:     240 4% 16%;     /* zinc-800 */
+    --muted:      240 4% 46%;     /* zinc-500 */
+  }
+
+  body {
+    background-color: #09090b;
+    color: #fafafa;               /* zinc-50 */
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+      Oxygen, Ubuntu, Cantarell, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* ─── Bento surface ─────────────────────────────────────────── */
+.bento-card {
+  background: #121214;
+  border: 1px solid rgba(63, 63, 70, 0.8);   /* zinc-700/80 */
+  border-radius: 1rem;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.bento-card-hover:hover {
+  border-color: rgba(82, 82, 91, 0.9);        /* zinc-600 */
+  box-shadow: 0 0 0 1px rgba(82, 82, 91, 0.15),
+              0 4px 24px -4px rgba(0, 0, 0, 0.5);
+}
+
+/* keep glass-panel as an alias so old refs don't break */
+.glass-panel {
+  background: #121214;
+  border: 1px solid rgba(63, 63, 70, 0.8);
+  border-radius: 1rem;
+}
+
+.glass-panel-hover {
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.glass-panel-hover:hover {
+  border-color: rgba(82, 82, 91, 0.9);
+  box-shadow: 0 0 0 1px rgba(82, 82, 91, 0.12),
+              0 4px 24px -4px rgba(0, 0, 0, 0.45);
+}
+
+/* ─── Subtle accent glows (no neon) ─────────────────────────── */
+.glow-emerald {
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.12);
+}
+
+.glow-cyan {
+  box-shadow: 0 0 12px rgba(14, 165, 233, 0.12);
+}
+
+/* ─── Custom scrollbar ───────────────────────────────────────── */
+::-webkit-scrollbar        { width: 5px; height: 5px; }
+::-webkit-scrollbar-track  { background: #09090b; }
+::-webkit-scrollbar-thumb  { background: #27272a; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #3f3f46; }
