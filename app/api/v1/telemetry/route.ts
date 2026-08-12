@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-
+export const dynamic = 'force-dynamic';
 // Pricing dictionary per 1,000,000 tokens
 // Rates in USD per single token
 const MODEL_PRICING: Record<
