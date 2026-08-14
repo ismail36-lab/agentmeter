@@ -30,8 +30,19 @@ function getProjectRef(): string {
 function isAuthenticated(request: NextRequest): boolean {
   const ref = getProjectRef();
   // Supabase v2 cookie name pattern
-  const cookieName = `sb-${ref}-auth-token`;
-  const cookie = request.cookies.get(cookieName)?.value;
+  const cookieName = ref ? `sb-${ref}-auth-token` : "sb-auth-token";
+  let cookie = request.cookies.get(cookieName)?.value;
+
+  // Fallback: look for any cookie matching sb-*-auth-token if ref fails
+  if (!cookie) {
+    const allCookies = request.cookies.getAll();
+    const sbCookie = allCookies.find(
+      (c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token")
+    );
+    if (sbCookie) {
+      cookie = sbCookie.value;
+    }
+  }
 
   if (!cookie) return false;
 
@@ -49,6 +60,11 @@ function isAuthenticated(request: NextRequest): boolean {
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Prevent infinite loop: Never redirect to /login if user is ALREADY on /login
+  if (pathname.startsWith("/login")) {
+    return NextResponse.next();
+  }
 
   const isProtected = PROTECTED_PATHS.some(
     (path) => pathname === path || pathname.startsWith(path + "/")

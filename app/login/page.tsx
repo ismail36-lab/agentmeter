@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Zap, Mail, Lock, Eye, EyeOff, Loader2, ShieldCheck, AlertCircle } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { supabase, syncSessionCookie } from "@/lib/supabase";
 
 type AuthMode = "login" | "signup";
 
@@ -15,13 +15,32 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
-  // If already logged in, redirect to dashboard
+  const hasRedirectedRef = useRef(false);
+
+  // Helper to get destination URL from query params
+  const getNextDestination = () => {
+    if (typeof window === "undefined") return "/dashboard";
+    const params = new URLSearchParams(window.location.search);
+    const next = params.get("next");
+    return next && next.startsWith("/") ? next : "/dashboard";
+  };
+
+  // If already logged in, redirect to destination/dashboard ONCE
   useEffect(() => {
+    let isMounted = true;
+
     supabase.auth.getSession().then(({ data }) => {
-      if (data.session) {
-        window.location.href = "/dashboard";
+      if (!isMounted) return;
+      if (data.session && !hasRedirectedRef.current) {
+        hasRedirectedRef.current = true;
+        syncSessionCookie(data.session);
+        window.location.href = getNextDestination();
       }
     });
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -32,26 +51,34 @@ export default function LoginPage() {
 
     try {
       if (mode === "login") {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
           setError(error.message);
+          setIsLoading(false);
           return;
         }
-        window.location.href = "/dashboard";
+        if (data.session) {
+          syncSessionCookie(data.session);
+        }
+        if (!hasRedirectedRef.current) {
+          hasRedirectedRef.current = true;
+          window.location.href = getNextDestination();
+        }
       } else {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) {
           setError(error.message);
+          setIsLoading(false);
           return;
         }
         setSuccessMsg(
           "Account created! Check your email to confirm your address, then sign in."
         );
         setMode("login");
+        setIsLoading(false);
       }
     } catch (err: any) {
       setError(err?.message ?? "An unexpected error occurred.");
-    } finally {
       setIsLoading(false);
     }
   };
