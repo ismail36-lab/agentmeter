@@ -1,14 +1,12 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { Zap, Mail, Lock, Eye, EyeOff, Loader2, ShieldCheck, AlertCircle } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
 type AuthMode = "login" | "signup";
 
 export default function LoginPage() {
-  const router = useRouter();
   const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -21,10 +19,10 @@ export default function LoginPage() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) {
-        router.replace("/dashboard");
+        window.location.href = "/dashboard";
       }
     });
-  }, [router]);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,11 +33,17 @@ export default function LoginPage() {
     try {
       if (mode === "login") {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        router.push("/dashboard");
+        if (error) {
+          setError(error.message);
+          return;
+        }
+        window.location.href = "/dashboard";
       } else {
         const { error } = await supabase.auth.signUp({ email, password });
-        if (error) throw error;
+        if (error) {
+          setError(error.message);
+          return;
+        }
         setSuccessMsg(
           "Account created! Check your email to confirm your address, then sign in."
         );
