@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
   DollarSign,
   Cpu,
@@ -16,6 +17,8 @@ import {
   Layers,
   Terminal,
   Clock,
+  LogOut,
+  User,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -128,10 +131,15 @@ function modelBadgeClass(model: string) {
 }
 
 export default function Dashboard() {
+  const router = useRouter();
   const [logs, setLogs] = useState<UsageLog[]>(INITIAL_LOGS);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedFilterModel, setSelectedFilterModel] = useState<string>("all");
   const [copiedKey, setCopiedKey] = useState(false);
+
+  // Auth state
+  const [userId, setUserId] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   // Playground State
   const [testModel, setTestModel] = useState<string>("gpt-4o");
@@ -141,15 +149,23 @@ export default function Dashboard() {
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
 
-  // Fetch telemetry from Supabase
-  const fetchLogs = async () => {
+  // Fetch telemetry from Supabase, filtered by the logged-in user
+  const fetchLogs = async (uid?: string | null) => {
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from("usage_logs")
         .select("*")
         .order("created_at", { ascending: false })
         .limit(100);
+
+      // Filter by user_id when available
+      const activeUid = uid ?? userId;
+      if (activeUid) {
+        query = query.eq("user_id", activeUid);
+      }
+
+      const { data, error } = await query;
 
       if (!error && data && data.length > 0) {
         setLogs(data);
@@ -161,8 +177,26 @@ export default function Dashboard() {
     }
   };
 
+  // Sign out handler
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    router.push("/login");
+  };
+
+  // Bootstrap: get session then fetch logs filtered by user
   useEffect(() => {
-    fetchLogs();
+    supabase.auth.getSession().then(({ data }) => {
+      const user = data.session?.user;
+      if (user) {
+        setUserId(user.id);
+        setUserEmail(user.email ?? null);
+        fetchLogs(user.id);
+      } else {
+        // No session — middleware should have redirected, but fetch unfiltered as fallback
+        fetchLogs(null);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Compute Metrics
@@ -291,12 +325,31 @@ export default function Dashboard() {
               <span className="font-mono">Ingestion API Active</span>
             </div>
             <button
-              onClick={fetchLogs}
+              onClick={() => fetchLogs()}
               disabled={isLoading}
               className="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-colors"
               title="Refresh Telemetry"
             >
               <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin text-emerald-400" : ""}`} />
+            </button>
+
+            {/* User email chip */}
+            {userEmail && (
+              <div className="hidden sm:flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-400">
+                <User className="h-3.5 w-3.5 text-zinc-500" />
+                <span className="font-mono max-w-[140px] truncate">{userEmail}</span>
+              </div>
+            )}
+
+            {/* Sign Out button */}
+            <button
+              id="sign-out-btn"
+              onClick={handleSignOut}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-xs text-zinc-400 hover:text-zinc-50 transition-colors"
+              title="Sign Out"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Sign Out</span>
             </button>
           </div>
         </div>
