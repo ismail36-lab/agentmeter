@@ -120,29 +120,44 @@ export default function Home() {
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
 
   const handleSelectPlan = async (planKey: string) => {
+    // 3. "Talk to Sales" (Enterprise) -> Opens mailto link support@agentmeter.io
     if (planKey === "enterprise") {
-      window.location.href = "mailto:sales@agentmeter.io";
+      window.location.href = "mailto:support@agentmeter.io";
       return;
     }
 
-    setLoadingPlan(planKey);
+    // 2. "Start Pro Trial" ($49/mo Plan) -> Calls API route /api/checkout?plan=pro
+    if (planKey === "pro") {
+      setLoadingPlan("pro");
+      try {
+        const res = await fetch("/api/checkout?plan=pro");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.url) {
+            window.location.href = data.url;
+            return;
+          }
+        }
+        window.location.href = "/api/checkout?plan=pro";
+      } catch {
+        window.location.href = "/api/checkout?plan=pro";
+      } finally {
+        setLoadingPlan(null);
+      }
+      return;
+    }
+
+    // 1. "Get Started" (Free Plan) -> Redirects to /dashboard (or /login)
+    setLoadingPlan("free");
     try {
       const { data } = await supabase.auth.getSession();
       if (data.session?.user) {
-        // User logged in: update plan via API
-        const res = await fetch("/api/plan", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ plan: planKey }),
-        });
-        if (res.ok) {
-          router.push("/dashboard");
-          return;
-        }
+        router.push("/dashboard");
+      } else {
+        router.push("/login");
       }
-      router.push(`/login?plan=${planKey}`);
     } catch {
-      router.push(`/login?plan=${planKey}`);
+      router.push("/login");
     } finally {
       setLoadingPlan(null);
     }
