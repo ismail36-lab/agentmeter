@@ -28,6 +28,8 @@ import {
   Eye,
   EyeOff,
 } from "lucide-react";
+import { UsageTrendChart } from "@/components/charts/UsageTrendChart";
+import { ModelDistributionChart } from "@/components/charts/ModelDistributionChart";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -183,8 +185,10 @@ export default function Dashboard() {
       if (res.ok) {
         const data = await res.json();
         if (data.metrics) setMetrics(data.metrics);
-        if (data.dailyTrend) setDailyTrend(data.dailyTrend);
-        if (data.modelBreakdown) setModelBreakdown(data.modelBreakdown);
+        const trends = data.daily_trends || data.dailyTrend;
+        if (trends) setDailyTrend(trends);
+        const breakdown = data.model_breakdown || data.modelBreakdown;
+        if (breakdown) setModelBreakdown(breakdown);
       }
     } catch (err) {
       console.warn("Failed to fetch metrics:", err);
@@ -542,6 +546,16 @@ export default function Dashboard() {
               </span>
             </div>
             <p className="mt-2 text-xs text-zinc-600">Highest spend model</p>
+          </div>
+        </div>
+
+        {/* ── Visual Charts Row ─────────────────────────────── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            <UsageTrendChart data={dailyTrend} />
+          </div>
+          <div className="lg:col-span-1">
+            <ModelDistributionChart data={modelBreakdown} />
           </div>
         </div>
 

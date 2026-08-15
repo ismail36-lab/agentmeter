@@ -82,14 +82,14 @@ export async function GET(req: NextRequest) {
       }
     });
 
-    // Daily trend (last 7 days)
-    const daysMap: Record<string, { spend: number; tokens: number }> = {};
+    // Daily trend (last 30 days)
+    const daysMap: Record<string, { cost: number; spend: number; tokens: number }> = {};
     const now = new Date();
-    for (let i = 6; i >= 0; i--) {
+    for (let i = 29; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
       const label = d.toLocaleDateString("en-US", { month: "short", day: "2-digit" });
-      daysMap[label] = { spend: 0, tokens: 0 };
+      daysMap[label] = { cost: 0, spend: 0, tokens: 0 };
     }
 
     userLogs.forEach((log) => {
@@ -98,13 +98,17 @@ export async function GET(req: NextRequest) {
       const logDate = new Date(dateStr);
       const label = logDate.toLocaleDateString("en-US", { month: "short", day: "2-digit" });
       if (daysMap[label]) {
-        daysMap[label].spend += getLogCost(log);
-        daysMap[label].tokens += getLogTokens(log);
+        const cVal = getLogCost(log);
+        const tVal = getLogTokens(log);
+        daysMap[label].cost += cVal;
+        daysMap[label].spend += cVal;
+        daysMap[label].tokens += tVal;
       }
     });
 
     const dailyTrend = Object.entries(daysMap).map(([date, values]) => ({
       date,
+      cost: Number(values.cost.toFixed(6)),
       spend: Number(values.spend.toFixed(4)),
       tokens: values.tokens,
     }));
@@ -117,13 +121,14 @@ export async function GET(req: NextRequest) {
     };
 
     userLogs.forEach((log) => {
-      const key = log.model in modelBreakdownMap ? log.model : "other";
+      const m = log.model || "other";
+      const key = m in modelBreakdownMap ? m : "other";
       modelBreakdownMap[key] = (modelBreakdownMap[key] || 0) + getLogCost(log);
     });
 
     const modelBreakdown = Object.entries(modelBreakdownMap).map(([name, value]) => ({
       name,
-      value: Number(value.toFixed(5)),
+      value: Number(value.toFixed(6)),
       color: MODEL_COLORS[name] || MODEL_COLORS.other,
     }));
 
@@ -136,7 +141,9 @@ export async function GET(req: NextRequest) {
           topModel,
         },
         dailyTrend,
+        daily_trends: dailyTrend,
         modelBreakdown,
+        model_breakdown: modelBreakdown,
       },
       { headers: NO_CACHE_HEADERS }
     );
