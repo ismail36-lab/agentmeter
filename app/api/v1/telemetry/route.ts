@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
-export const dynamic = 'force-dynamic';
-// Pricing dictionary per 1,000,000 tokens
-// Rates in USD per single token
+
+export const dynamic = "force-dynamic";
+
+// Pricing dictionary per 1,000,000 tokens (Rates in USD per single token)
 const MODEL_PRICING: Record<
   string,
   { input_cost_per_token: number; output_cost_per_token: number }
@@ -59,14 +60,15 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Authenticate key against `api_keys` table in Supabase
-    let apiKeyRecord: { id?: string; name?: string; is_active?: boolean } | null = null;
+    // 2. Fetch user_id and key record from `api_keys` table in Supabase
+    let apiKeyRecord: { id?: string; name?: string; user_id?: string; is_active?: boolean } | null = null;
+    let userId: string | null = null;
     let keyAuthFailed = false;
 
     try {
       const { data, error } = await supabaseAdmin
         .from("api_keys")
-        .select("*")
+        .select("id, name, user_id, is_active, status, key")
         .eq("key", apiKey)
         .maybeSingle();
 
@@ -82,15 +84,15 @@ export async function POST(req: NextRequest) {
           );
         }
         apiKeyRecord = data;
+        userId = data.user_id ?? null;
       } else if (!error && apiKey.startsWith("am_test_")) {
-        // Fallback for default test key when table has not been initialized with sample keys
+        // Fallback for default test key
         apiKeyRecord = { id: "test_key_01", name: "Development Key", is_active: true };
       } else if (data === null && !error) {
-        // Key not found in api_keys table
         keyAuthFailed = true;
       }
     } catch (err) {
-      console.warn("API key verification bypassed/fallback:", err);
+      console.warn("API key verification notice:", err);
     }
 
     if (keyAuthFailed) {
@@ -102,49 +104,52 @@ export async function POST(req: NextRequest) {
 
     // 3. Parse JSON Body
     const body = await req.json();
-    const { model, prompt_tokens, completion_tokens, metadata } = body;
+    const { model, prompt_tokens, completion_tokens, input_tokens, output_tokens, metadata } = body;
 
-    if (!model || prompt_tokens === undefined || completion_tokens === undefined) {
+    const pTokens = Number(prompt_tokens ?? input_tokens ?? 0);
+    const cTokens = Number(completion_tokens ?? output_tokens ?? 0);
+
+    if (!model || (prompt_tokens === undefined && input_tokens === undefined)) {
       return NextResponse.json(
         {
           error:
-            "Bad Request: Required fields missing. Must provide 'model', 'prompt_tokens', and 'completion_tokens'.",
+            "Bad Request: Required fields missing. Must provide 'model', 'prompt_tokens' (or 'input_tokens'), and 'completion_tokens' (or 'output_tokens').",
         },
         { status: 400, headers: getCorsHeaders() }
       );
     }
 
-    const pTokens = Number(prompt_tokens) || 0;
-    const cTokens = Number(completion_tokens) || 0;
     const totalTokens = pTokens + cTokens;
 
     // 4. Cost calculation logic
     const pricing = MODEL_PRICING[model.toLowerCase()] || DEFAULT_PRICING;
     const calculatedCost =
       pTokens * pricing.input_cost_per_token + cTokens * pricing.output_cost_per_token;
-
-    // Format cost to 6 decimal places for precision
     const roundedCost = Number(calculatedCost.toFixed(6));
 
-    // 5. Log into Supabase `usage_logs` table
-    const logEntry = {
-      api_key_id: apiKeyRecord?.id || null,
-      api_key: apiKey.slice(0, 8) + "...",
+    const nowIso = new Date().toISOString();
+
+    // 5. Construct log payload explicitly including user_id for DB schema
+    const logPayload = {
+      user_id: userId,
+      provider: body.provider || "openai",
       model: model.toLowerCase(),
-      prompt_tokens: pTokens,
-      completion_tokens: cTokens,
-      total_tokens: totalTokens,
-      cost: roundedCost,
-      metadata: metadata || {},
-      created_at: new Date().toISOString(),
+      input_tokens: pTokens,
+      output_tokens: cTokens,
+      total_cost_usd: roundedCost,
+      latency_ms: Number(body.latency_ms || body.latency) || 100,
+      status_code: 200,
+      timestamp: nowIso,
+      created_at: nowIso,
     };
 
-    let logId = "log_" + Date.now() + "_" + Math.random().toString(36).substr(2, 6);
+    let logId = "log_" + Date.now() + "_" + Math.random().toString(36).substring(2, 8);
 
     try {
+      // Primary insert into usage_logs table
       const { data: logData, error: logError } = await supabaseAdmin
         .from("usage_logs")
-        .insert([logEntry])
+        .insert([logPayload])
         .select()
         .single();
 
@@ -168,7 +173,7 @@ export async function POST(req: NextRequest) {
         total_tokens: totalTokens,
         calculated_cost: roundedCost,
         currency: "USD",
-        timestamp: logEntry.created_at,
+        timestamp: nowIso,
       },
       { status: 200, headers: getCorsHeaders() }
     );

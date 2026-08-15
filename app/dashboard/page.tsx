@@ -12,13 +12,19 @@ import {
   CheckCircle2,
   Copy,
   Filter,
-  ArrowUpRight,
   ShieldCheck,
   Layers,
   Terminal,
   Clock,
   LogOut,
   User,
+  Key,
+  Plus,
+  Trash2,
+  Loader2,
+  AlertCircle,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -34,6 +40,14 @@ import {
 } from "recharts";
 import { supabase } from "@/lib/supabase";
 
+interface ApiKeyItem {
+  id: string;
+  name: string;
+  key: string;
+  is_active: boolean;
+  created_at: string;
+}
+
 interface UsageLog {
   id: string;
   created_at: string;
@@ -46,73 +60,24 @@ interface UsageLog {
   metadata?: any;
 }
 
-const INITIAL_LOGS: UsageLog[] = [
-  {
-    id: "log_01",
-    created_at: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
-    model: "gpt-4o",
-    prompt_tokens: 1250,
-    completion_tokens: 480,
-    total_tokens: 1730,
-    cost: 0.007925,
-    api_key: "am_test_sk...",
-    metadata: { agent: "CustomerSupport" },
-  },
-  {
-    id: "log_02",
-    created_at: new Date(Date.now() - 1000 * 60 * 18).toISOString(),
-    model: "claude-3-5-sonnet",
-    prompt_tokens: 2100,
-    completion_tokens: 1150,
-    total_tokens: 3250,
-    cost: 0.02355,
-    api_key: "am_test_sk...",
-    metadata: { agent: "CodeReviewer" },
-  },
-  {
-    id: "log_03",
-    created_at: new Date(Date.now() - 1000 * 60 * 42).toISOString(),
-    model: "gpt-4o-mini",
-    prompt_tokens: 3400,
-    completion_tokens: 920,
-    total_tokens: 4320,
-    cost: 0.001062,
-    api_key: "am_test_sk...",
-    metadata: { agent: "Classifier" },
-  },
-  {
-    id: "log_04",
-    created_at: new Date(Date.now() - 1000 * 60 * 95).toISOString(),
-    model: "gpt-4o",
-    prompt_tokens: 4120,
-    completion_tokens: 890,
-    total_tokens: 5010,
-    cost: 0.0192,
-    api_key: "am_test_sk...",
-    metadata: { agent: "DocSummarizer" },
-  },
-  {
-    id: "log_05",
-    created_at: new Date(Date.now() - 1000 * 60 * 180).toISOString(),
-    model: "claude-3-5-sonnet",
-    prompt_tokens: 1850,
-    completion_tokens: 640,
-    total_tokens: 2490,
-    cost: 0.01515,
-    api_key: "am_test_sk...",
-    metadata: { agent: "DataExtractor" },
-  },
-];
+interface MetricsData {
+  totalSpend: number;
+  totalTokens: number;
+  totalRequests: number;
+  topModel: string;
+}
 
-const DAILY_TREND_INITIAL = [
-  { date: "Aug 06", spend: 12.4, tokens: 1850000 },
-  { date: "Aug 07", spend: 18.2, tokens: 2420000 },
-  { date: "Aug 08", spend: 15.8, tokens: 2100000 },
-  { date: "Aug 09", spend: 24.5, tokens: 3600000 },
-  { date: "Aug 10", spend: 29.1, tokens: 4120000 },
-  { date: "Aug 11", spend: 34.6, tokens: 4890000 },
-  { date: "Aug 12", spend: 41.8, tokens: 5780000 },
-];
+interface DailyTrendItem {
+  date: string;
+  spend: number;
+  tokens: number;
+}
+
+interface ModelBreakdownItem {
+  name: string;
+  value: number;
+  color: string;
+}
 
 const MODEL_COLORS: Record<string, string> = {
   "gpt-4o": "#10b981",          // emerald-500
@@ -121,7 +86,6 @@ const MODEL_COLORS: Record<string, string> = {
   other: "#f59e0b",             // amber-500
 };
 
-/* ─── Model badge helper ────────────────────────────────────── */
 function modelBadgeClass(model: string) {
   if (model === "gpt-4o")
     return "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
@@ -132,48 +96,119 @@ function modelBadgeClass(model: string) {
 
 export default function Dashboard() {
   const router = useRouter();
-  const [logs, setLogs] = useState<UsageLog[]>(INITIAL_LOGS);
-  const [isLoading, setIsLoading] = useState(false);
-  const [selectedFilterModel, setSelectedFilterModel] = useState<string>("all");
-  const [copiedKey, setCopiedKey] = useState(false);
 
-  // Auth state
+  // Auth State
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
-  // Playground State
+  // Data Loading States
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [isLoadingMetrics, setIsLoadingMetrics] = useState(false);
+
+  // Metrics & Chart Data State
+  const [metrics, setMetrics] = useState<MetricsData>({
+    totalSpend: 0,
+    totalTokens: 0,
+    totalRequests: 0,
+    topModel: "N/A",
+  });
+  const [dailyTrend, setDailyTrend] = useState<DailyTrendItem[]>([]);
+  const [modelBreakdown, setModelBreakdown] = useState<ModelBreakdownItem[]>([]);
+  const [logs, setLogs] = useState<UsageLog[]>([]);
+  const [selectedFilterModel, setSelectedFilterModel] = useState<string>("all");
+
+  // API Key Management State
+  const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>([]);
+  const [isLoadingKeys, setIsLoadingKeys] = useState(false);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [isCreatingKey, setIsCreatingKey] = useState(false);
+  const [newlyCreatedKey, setNewlyCreatedKey] = useState<string | null>(null);
+  const [keyError, setKeyError] = useState<string | null>(null);
+  const [revokingKeyId, setRevokingKeyId] = useState<string | null>(null);
+  const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
+  const [visibleKeyIds, setVisibleKeyIds] = useState<Record<string, boolean>>({});
+
+  // Playground / Ingestion API Tester State
   const [testModel, setTestModel] = useState<string>("gpt-4o");
   const [testPromptTokens, setTestPromptTokens] = useState<number>(1500);
   const [testCompletionTokens, setTestCompletionTokens] = useState<number>(450);
-  const [testApiKey, setTestApiKey] = useState<string>("am_test_sk_9918237192");
+  const [testApiKey, setTestApiKey] = useState<string>("");
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
 
-  // Fetch telemetry from Supabase, filtered by the logged-in user
-  const fetchLogs = async (uid?: string | null) => {
-    setIsLoading(true);
+  // 1. Fetch User API Keys
+  const fetchApiKeys = async () => {
+    setIsLoadingKeys(true);
     try {
+      const sessionRes = await supabase.auth.getSession();
+      const token = sessionRes.data.session?.access_token;
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch("/api/keys", { headers });
+      if (res.ok) {
+        const data = await res.json();
+        const activeKeys = (data.keys || []).filter((k: ApiKeyItem) => k.is_active);
+        setApiKeys(activeKeys);
+
+        // Auto-select first key for playground if testApiKey is empty
+        if (activeKeys.length > 0 && !testApiKey) {
+          setTestApiKey(activeKeys[0].key);
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to fetch API keys:", err);
+    } finally {
+      setIsLoadingKeys(false);
+    }
+  };
+
+  // 2. Fetch Calculated Metrics & Chart Data from API
+  const fetchMetrics = async () => {
+    setIsLoadingMetrics(true);
+    try {
+      const sessionRes = await supabase.auth.getSession();
+      const token = sessionRes.data.session?.access_token;
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch("/api/metrics", { headers });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.metrics) setMetrics(data.metrics);
+        if (data.dailyTrend) setDailyTrend(data.dailyTrend);
+        if (data.modelBreakdown) setModelBreakdown(data.modelBreakdown);
+      }
+    } catch (err) {
+      console.warn("Failed to fetch metrics:", err);
+    } finally {
+      setIsLoadingMetrics(false);
+    }
+  };
+
+  // 3. Fetch Raw Usage Logs for Table
+  const fetchLogs = async (uid?: string | null) => {
+    setIsLoadingLogs(true);
+    try {
+      const activeUid = uid ?? userId;
       let query = supabase
         .from("usage_logs")
         .select("*")
         .order("created_at", { ascending: false })
         .limit(100);
 
-      // Filter by user_id when available
-      const activeUid = uid ?? userId;
       if (activeUid) {
         query = query.eq("user_id", activeUid);
       }
 
       const { data, error } = await query;
-
-      if (!error && data && data.length > 0) {
+      if (!error && data) {
         setLogs(data);
       }
     } catch (err) {
-      console.warn("Could not fetch from Supabase usage_logs directly:", err);
+      console.warn("Could not fetch usage_logs:", err);
     } finally {
-      setIsLoading(false);
+      setIsLoadingLogs(false);
     }
   };
 
@@ -183,63 +218,84 @@ export default function Dashboard() {
     router.push("/login");
   };
 
-  // Bootstrap: get session then fetch logs filtered by user
+  // Bootstrap session check & load data
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       const user = data.session?.user;
       if (user) {
         setUserId(user.id);
         setUserEmail(user.email ?? null);
+        fetchApiKeys();
+        fetchMetrics();
         fetchLogs(user.id);
-      } else {
-        // No session — middleware should have redirected, but fetch unfiltered as fallback
-        fetchLogs(null);
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Compute Metrics
-  const metrics = useMemo(() => {
-    const totalSpend = logs.reduce((acc, curr) => acc + (curr.cost || 0), 0);
-    const totalTokens = logs.reduce((acc, curr) => acc + (curr.total_tokens || 0), 0);
-    const totalRequests = logs.length;
+  // Handle Create API Key
+  const handleCreateKey = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsCreatingKey(true);
+    setKeyError(null);
+    setNewlyCreatedKey(null);
 
-    const modelCounts: Record<string, number> = {};
-    logs.forEach((log) => {
-      modelCounts[log.model] = (modelCounts[log.model] || 0) + (log.cost || 0);
-    });
+    try {
+      const res = await fetch("/api/keys", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newKeyName.trim() || "Default Key" }),
+      });
 
-    let topModel = "gpt-4o";
-    let maxSpend = -1;
-    Object.entries(modelCounts).forEach(([m, s]) => {
-      if (s > maxSpend) { maxSpend = s; topModel = m; }
-    });
+      const data = await res.json();
+      if (!res.ok) {
+        setKeyError(data.error || "Failed to create key");
+        return;
+      }
 
-    return { totalSpend, totalTokens, totalRequests, topModel };
-  }, [logs]);
+      if (data.key) {
+        setNewlyCreatedKey(data.key.key);
+        setTestApiKey(data.key.key); // Auto select new key in tester
+        setNewKeyName("");
+        await fetchApiKeys();
+      }
+    } catch (err: any) {
+      setKeyError(err.message || "Failed to create key");
+    } finally {
+      setIsCreatingKey(false);
+    }
+  };
 
-  // Model Breakdown for Donut Chart
-  const modelBreakdownData = useMemo(() => {
-    const map: Record<string, number> = {
-      "gpt-4o": 0,
-      "gpt-4o-mini": 0,
-      "claude-3-5-sonnet": 0,
-    };
+  // Handle Revoke API Key
+  const handleRevokeKey = async (keyId: string) => {
+    setRevokingKeyId(keyId);
+    try {
+      const res = await fetch(`/api/keys/${keyId}`, { method: "DELETE" });
+      if (res.ok) {
+        setApiKeys((prev) => prev.filter((k) => k.id !== keyId));
+        if (testApiKey && apiKeys.find((k) => k.id === keyId)?.key === testApiKey) {
+          const remaining = apiKeys.filter((k) => k.id !== keyId);
+          setTestApiKey(remaining.length > 0 ? remaining[0].key : "");
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to revoke key:", err);
+    } finally {
+      setRevokingKeyId(null);
+    }
+  };
 
-    logs.forEach((log) => {
-      const key = log.model in map ? log.model : "other";
-      map[key] = (map[key] || 0) + (log.cost || 0);
-    });
+  const copyToClipboard = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedKeyId(id);
+    setTimeout(() => setCopiedKeyId(null), 2000);
+  };
 
-    return Object.entries(map).map(([name, value]) => ({
-      name,
-      value: Number(value.toFixed(5)),
-      color: MODEL_COLORS[name] || MODEL_COLORS.other,
-    }));
-  }, [logs]);
+  const toggleKeyVisibility = (id: string) => {
+    setVisibleKeyIds((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
 
-  // Filtered Logs
+  // Filtered Logs for Table
   const filteredLogs = useMemo(() => {
     if (selectedFilterModel === "all") return logs;
     return logs.filter(
@@ -247,8 +303,13 @@ export default function Dashboard() {
     );
   }, [logs, selectedFilterModel]);
 
-  // Send Test Telemetry to Ingestion API
+  // Handle Ingestion API Test Payload Submission
   const handleSendTestTelemetry = async () => {
+    if (!testApiKey) {
+      setTestResult({ error: "No API key selected. Please generate an API Key first." });
+      return;
+    }
+
     setIsSendingTest(true);
     setTestResult(null);
     try {
@@ -270,18 +331,9 @@ export default function Dashboard() {
       setTestResult(data);
 
       if (res.ok && data.success) {
-        const newLog: UsageLog = {
-          id: data.log_id,
-          created_at: data.timestamp || new Date().toISOString(),
-          model: data.model,
-          prompt_tokens: data.prompt_tokens,
-          completion_tokens: data.completion_tokens,
-          total_tokens: data.total_tokens,
-          cost: data.calculated_cost,
-          api_key: testApiKey.slice(0, 8) + "...",
-          metadata: { source: "Dashboard Playground" },
-        };
-        setLogs((prev) => [newLog, ...prev]);
+        // Refetch logs and metrics so charts update live
+        await fetchMetrics();
+        await fetchLogs(userId);
       }
     } catch (err: any) {
       setTestResult({ error: "Request Failed", details: err.message });
@@ -290,11 +342,7 @@ export default function Dashboard() {
     }
   };
 
-  const copyKeyToClipboard = () => {
-    navigator.clipboard.writeText(testApiKey);
-    setCopiedKey(true);
-    setTimeout(() => setCopiedKey(false), 2000);
-  };
+  const isGlobalLoading = isLoadingLogs || isLoadingMetrics;
 
   return (
     <div className="min-h-screen bg-[#09090b] text-zinc-50 flex flex-col font-sans selection:bg-emerald-500/20">
@@ -324,20 +372,21 @@ export default function Dashboard() {
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="font-mono">Ingestion API Active</span>
             </div>
+
             <button
-              onClick={() => fetchLogs()}
-              disabled={isLoading}
+              onClick={() => { fetchMetrics(); fetchLogs(userId); fetchApiKeys(); }}
+              disabled={isGlobalLoading}
               className="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-colors"
-              title="Refresh Telemetry"
+              title="Refresh All Data"
             >
-              <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin text-emerald-400" : ""}`} />
+              <RefreshCw className={`h-4 w-4 ${isGlobalLoading ? "animate-spin text-emerald-400" : ""}`} />
             </button>
 
             {/* User email chip */}
             {userEmail && (
               <div className="hidden sm:flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-400">
                 <User className="h-3.5 w-3.5 text-zinc-500" />
-                <span className="font-mono max-w-[140px] truncate">{userEmail}</span>
+                <span className="font-mono max-w-[160px] truncate">{userEmail}</span>
               </div>
             )}
 
@@ -358,7 +407,7 @@ export default function Dashboard() {
       {/* ── Main ───────────────────────────────────────────────── */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
 
-        {/* ── Banner ─────────────────────────────────────────── */}
+        {/* ── Header Banner ──────────────────────────────────── */}
         <div className="bento-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <h1 className="text-xl font-semibold text-zinc-50 flex items-center gap-2">
@@ -382,23 +431,14 @@ export default function Dashboard() {
             </p>
           </div>
 
-          {/* API key chip */}
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-400 shrink-0">
-            <span className="text-zinc-600">KEY:</span>
-            <span className="text-zinc-300">{testApiKey.slice(0, 15)}…</span>
-            <button
-              onClick={copyKeyToClipboard}
-              className="p-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-50 transition-colors"
-              title="Copy API Key"
-            >
-              {copiedKey
-                ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                : <Copy className="h-3.5 w-3.5" />}
-            </button>
+          <div className="flex items-center gap-2 font-mono text-xs text-zinc-400 shrink-0">
+            <span className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400">
+              {apiKeys.length} Active {apiKeys.length === 1 ? "Key" : "Keys"}
+            </span>
           </div>
         </div>
 
-        {/* ── Metric Cards ───────────────────────────────────── */}
+        {/* ── Metric Cards Row ───────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
           {/* Total Spend */}
@@ -414,10 +454,10 @@ export default function Dashboard() {
                 ${metrics.totalSpend.toFixed(4)}
               </span>
               <span className="text-xs font-medium text-emerald-400 flex items-center gap-0.5">
-                +14.2% <ArrowUpRight className="h-3 w-3" />
+                USD
               </span>
             </div>
-            <p className="mt-1 text-xs text-zinc-600">Calculated real-time LLM cost</p>
+            <p className="mt-1 text-xs text-zinc-600">Real-time aggregate LLM cost</p>
           </div>
 
           {/* Total Tokens */}
@@ -432,7 +472,7 @@ export default function Dashboard() {
               <span className="text-3xl font-bold text-zinc-50 tracking-tight">
                 {metrics.totalTokens.toLocaleString()}
               </span>
-              <span className="text-xs font-medium text-sky-400">Tokens processed</span>
+              <span className="text-xs font-medium text-sky-400">Tokens</span>
             </div>
             <p className="mt-1 text-xs text-zinc-600">Prompt + completion tokens</p>
           </div>
@@ -449,9 +489,9 @@ export default function Dashboard() {
               <span className="text-3xl font-bold text-zinc-50 tracking-tight">
                 {metrics.totalRequests}
               </span>
-              <span className="text-xs font-medium text-violet-400">Logs recorded</span>
+              <span className="text-xs font-medium text-violet-400">Logs</span>
             </div>
-            <p className="mt-1 text-xs text-zinc-600">Telemetry logs in database</p>
+            <p className="mt-1 text-xs text-zinc-600">Recorded telemetry logs</p>
           </div>
 
           {/* Top Model */}
@@ -467,7 +507,189 @@ export default function Dashboard() {
                 {metrics.topModel}
               </span>
             </div>
-            <p className="mt-2 text-xs text-zinc-600">Highest aggregate spend model</p>
+            <p className="mt-2 text-xs text-zinc-600">Highest spend model</p>
+          </div>
+        </div>
+
+        {/* ── API Key Management Bento Card ─────────────────── */}
+        <div className="bento-card p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2">
+                <Key className="h-4 w-4 text-emerald-400" />
+                API Key Management
+              </h3>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                Generate and manage secret keys to send LLM telemetry payloads to AgentMeter.
+              </p>
+            </div>
+          </div>
+
+          {/* Create key form */}
+          <form onSubmit={handleCreateKey} className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="text"
+              placeholder="Key label (e.g., Production Agent, Staging)"
+              value={newKeyName}
+              onChange={(e) => setNewKeyName(e.target.value)}
+              className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-emerald-500/60 transition-all font-mono"
+            />
+            <button
+              type="submit"
+              disabled={isCreatingKey}
+              className="py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-500/10 disabled:opacity-40"
+            >
+              {isCreatingKey ? (
+                <>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Generating…</span>
+                </>
+              ) : (
+                <>
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Generate New Key</span>
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* Error notice */}
+          {keyError && (
+            <div className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-mono">
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{keyError}</span>
+            </div>
+          )}
+
+          {/* Newly created key banner */}
+          {newlyCreatedKey && (
+            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-mono space-y-1">
+              <div className="flex items-center justify-between text-emerald-400 font-semibold">
+                <span>Secret Key Generated Successfully!</span>
+                <button
+                  type="button"
+                  onClick={() => copyToClipboard(newlyCreatedKey, "new_created_key")}
+                  className="p-1 rounded bg-emerald-950/60 text-emerald-300 hover:text-emerald-100 flex items-center gap-1"
+                >
+                  {copiedKeyId === "new_created_key" ? (
+                    <>
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3.5 w-3.5" />
+                      <span>Copy Full Key</span>
+                    </>
+                  )}
+                </button>
+              </div>
+              <p className="text-zinc-300 break-all bg-zinc-950/80 p-2 rounded-lg border border-zinc-800 text-[11px]">
+                {newlyCreatedKey}
+              </p>
+              <p className="text-zinc-500 text-[10px]">
+                Copy this key now. For security, full keys are hidden after creation.
+              </p>
+            </div>
+          )}
+
+          {/* Keys list table */}
+          <div className="overflow-x-auto rounded-xl border border-zinc-800/80 bg-zinc-950/60">
+            <table className="w-full text-left text-xs font-mono">
+              <thead className="bg-zinc-900/60 text-zinc-500 uppercase tracking-wider text-[10px] border-b border-zinc-800">
+                <tr>
+                  <th className="py-3 px-4">Key Name</th>
+                  <th className="py-3 px-4">Secret Key</th>
+                  <th className="py-3 px-4">Created</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-800/60 text-zinc-300">
+                {isLoadingKeys ? (
+                  <tr>
+                    <td colSpan={5} className="py-6 text-center text-zinc-500">
+                      <Loader2 className="h-4 w-4 animate-spin inline mr-2 text-emerald-400" />
+                      Loading API keys…
+                    </td>
+                  </tr>
+                ) : apiKeys.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-6 text-center text-zinc-500">
+                      No active API keys found. Click &quot;Generate New Key&quot; above to create one.
+                    </td>
+                  </tr>
+                ) : (
+                  apiKeys.map((item) => {
+                    const isVisible = Boolean(visibleKeyIds[item.id]);
+                    const displayKey = isVisible
+                      ? item.key
+                      : item.key.slice(0, 10) + "••••••••••••••••••••";
+
+                    return (
+                      <tr key={item.id} className="hover:bg-zinc-900/40 transition-colors">
+                        <td className="py-3 px-4 font-semibold text-zinc-200">{item.name}</td>
+                        <td className="py-3 px-4 text-zinc-400 font-mono">
+                          <div className="flex items-center gap-2">
+                            <span>{displayKey}</span>
+                            <button
+                              type="button"
+                              onClick={() => toggleKeyVisibility(item.id)}
+                              className="text-zinc-600 hover:text-zinc-300 transition-colors"
+                              title={isVisible ? "Hide Key" : "Show Key"}
+                            >
+                              {isVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                            </button>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-zinc-500">
+                          {new Date(item.created_at).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "2-digit",
+                            year: "numeric",
+                          })}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                            Active
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              type="button"
+                              onClick={() => copyToClipboard(item.key, item.id)}
+                              className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-50 transition-colors border border-zinc-800"
+                              title="Copy Key"
+                            >
+                              {copiedKeyId === item.id ? (
+                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                              ) : (
+                                <Copy className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRevokeKey(item.id)}
+                              disabled={revokingKeyId === item.id}
+                              className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors border border-red-500/20 disabled:opacity-40"
+                              title="Revoke Key"
+                            >
+                              {revokingKeyId === item.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -482,7 +704,7 @@ export default function Dashboard() {
                   <Activity className="h-4 w-4 text-emerald-400" />
                   Daily Spend Analytics
                 </h3>
-                <p className="text-xs text-zinc-500 mt-0.5">Cumulative spend progression (USD)</p>
+                <p className="text-xs text-zinc-500 mt-0.5">Real-time spend progression (USD) from Supabase logs</p>
               </div>
               <span className="text-[11px] font-mono px-2.5 py-1 rounded-md bg-zinc-900 text-zinc-400 border border-zinc-800">
                 Last 7 Days
@@ -491,11 +713,11 @@ export default function Dashboard() {
 
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={DAILY_TREND_INITIAL} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <AreaChart data={dailyTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                   <defs>
                     <linearGradient id="spendGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%"  stopColor="#10b981" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.0}  />
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
@@ -538,7 +760,7 @@ export default function Dashboard() {
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
-                    data={modelBreakdownData}
+                    data={modelBreakdown.length > 0 ? modelBreakdown : [{ name: "No data", value: 1, color: "#27272a" }]}
                     cx="50%"
                     cy="50%"
                     innerRadius={52}
@@ -546,7 +768,7 @@ export default function Dashboard() {
                     paddingAngle={3}
                     dataKey="value"
                   >
-                    {modelBreakdownData.map((entry, index) => (
+                    {(modelBreakdown.length > 0 ? modelBreakdown : [{ name: "No data", value: 1, color: "#27272a" }]).map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.color} stroke="#121214" strokeWidth={2} />
                     ))}
                   </Pie>
@@ -569,7 +791,7 @@ export default function Dashboard() {
             </div>
 
             <div className="mt-4 space-y-2">
-              {modelBreakdownData.map((item) => (
+              {modelBreakdown.map((item) => (
                 <div key={item.name} className="flex items-center justify-between text-xs font-mono">
                   <div className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
@@ -598,10 +820,29 @@ export default function Dashboard() {
             </div>
 
             <p className="text-xs text-zinc-500">
-              Send test telemetry payload to verify real-time pricing and database insertion.
+              Send test telemetry payload using your API key to verify pricing and live database insertion.
             </p>
 
             <div className="space-y-3 font-mono text-xs">
+              <div>
+                <label className="block text-zinc-500 mb-1">API Key to Use</label>
+                <select
+                  value={testApiKey}
+                  onChange={(e) => setTestApiKey(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2 text-zinc-200 focus:outline-none focus:border-zinc-600 transition-colors"
+                >
+                  {apiKeys.length === 0 ? (
+                    <option value="">No keys available — Generate key above</option>
+                  ) : (
+                    apiKeys.map((k) => (
+                      <option key={k.id} value={k.key}>
+                        {k.name} ({k.key.slice(0, 10)}…)
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+
               <div>
                 <label className="block text-zinc-500 mb-1">Target Model</label>
                 <select
@@ -638,11 +879,20 @@ export default function Dashboard() {
 
               <button
                 onClick={handleSendTestTelemetry}
-                disabled={isSendingTest}
+                disabled={isSendingTest || !testApiKey}
                 className="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/80 hover:border-zinc-600 text-zinc-50 font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-40"
               >
-                <Send className="h-3.5 w-3.5" />
-                <span>{isSendingTest ? "Sending…" : "Send Telemetry"}</span>
+                {isSendingTest ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <span>Sending…</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-3.5 w-3.5" />
+                    <span>Send Telemetry</span>
+                  </>
+                )}
               </button>
             </div>
 
@@ -702,32 +952,47 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800/60 text-zinc-300">
-                  {filteredLogs.slice(0, 10).map((log) => (
-                    <tr key={log.id} className="hover:bg-zinc-900/40 transition-colors">
-                      <td className="py-3 px-4 text-zinc-500 whitespace-nowrap" suppressHydrationWarning>
-                        {new Date(log.created_at).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                          second: "2-digit",
-                        })}
-                      </td>
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center whitespace-nowrap shrink-0 max-w-full px-2.5 py-1 rounded-full text-[10px] font-semibold ${modelBadgeClass(log.model)}`}
-                        >
-                          {log.model}
-                        </span>
-                      </td>
-                      <td className="py-3 px-4 text-zinc-500">{log.prompt_tokens?.toLocaleString()}</td>
-                      <td className="py-3 px-4 text-zinc-500">{log.completion_tokens?.toLocaleString()}</td>
-                      <td className="py-3 px-4 font-semibold text-zinc-200">
-                        {log.total_tokens?.toLocaleString()}
-                      </td>
-                      <td className="py-3 px-4 text-right text-emerald-400 font-semibold">
-                        ${log.cost ? log.cost.toFixed(6) : "0.000000"}
+                  {isLoadingLogs ? (
+                    <tr>
+                      <td colSpan={6} className="py-6 text-center text-zinc-500">
+                        <Loader2 className="h-4 w-4 animate-spin inline mr-2 text-emerald-400" />
+                        Loading telemetry logs…
                       </td>
                     </tr>
-                  ))}
+                  ) : filteredLogs.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-6 text-center text-zinc-500">
+                        No telemetry logs found. Generate an API key above and send a test payload!
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredLogs.slice(0, 15).map((log) => (
+                      <tr key={log.id} className="hover:bg-zinc-900/40 transition-colors">
+                        <td className="py-3 px-4 text-zinc-500 whitespace-nowrap" suppressHydrationWarning>
+                          {new Date(log.created_at).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                          })}
+                        </td>
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center whitespace-nowrap shrink-0 max-w-full px-2.5 py-1 rounded-full text-[10px] font-semibold ${modelBadgeClass(log.model)}`}
+                          >
+                            {log.model}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-zinc-500">{log.prompt_tokens?.toLocaleString()}</td>
+                        <td className="py-3 px-4 text-zinc-500">{log.completion_tokens?.toLocaleString()}</td>
+                        <td className="py-3 px-4 font-semibold text-zinc-200">
+                          {log.total_tokens?.toLocaleString()}
+                        </td>
+                        <td className="py-3 px-4 text-right text-emerald-400 font-semibold">
+                          ${log.cost ? Number(log.cost).toFixed(6) : "0.000000"}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
