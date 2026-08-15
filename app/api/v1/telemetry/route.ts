@@ -6,26 +6,78 @@ export const dynamic = "force-dynamic";
 // Pricing dictionary per 1,000,000 tokens (Rates in USD per single token)
 const MODEL_PRICING: Record<
   string,
-  { input_cost_per_token: number; output_cost_per_token: number }
+  { input_cost_per_token: number; output_cost_per_token: number; provider: string }
 > = {
+  // --- OpenAI Models ---
   "gpt-4o": {
-    input_cost_per_token: 2.5 / 1_000_000, // $2.50 per 1M prompt tokens
-    output_cost_per_token: 10.0 / 1_000_000, // $10.00 per 1M completion tokens
+    input_cost_per_token: 2.5 / 1_000_000,
+    output_cost_per_token: 10.0 / 1_000_000,
+    provider: "openai",
   },
   "gpt-4o-mini": {
-    input_cost_per_token: 0.15 / 1_000_000, // $0.15 per 1M prompt tokens
-    output_cost_per_token: 0.6 / 1_000_000, // $0.60 per 1M completion tokens
+    input_cost_per_token: 0.15 / 1_000_000,
+    output_cost_per_token: 0.6 / 1_000_000,
+    provider: "openai",
   },
-  "claude-3-5-sonnet": {
-    input_cost_per_token: 3.0 / 1_000_000, // $3.00 per 1M prompt tokens
-    output_cost_per_token: 15.0 / 1_000_000, // $15.00 per 1M completion tokens
+  "o1": {
+    input_cost_per_token: 15.0 / 1_000_000,
+    output_cost_per_token: 60.0 / 1_000_000,
+    provider: "openai",
   },
-};
+  "o1-preview": {
+    input_cost_per_token: 15.0 / 1_000_000,
+    output_cost_per_token: 60.0 / 1_000_000,
+    provider: "openai",
+  },
+  "o1-mini": {
+    input_cost_per_token: 3.0 / 1_000_000,
+    output_cost_per_token: 12.0 / 1_000_000,
+    provider: "openai",
+  },
 
-// Default pricing fallback for unrecognized models
-const DEFAULT_PRICING = {
-  input_cost_per_token: 2.0 / 1_000_000,
-  output_cost_per_token: 8.0 / 1_000_000,
+  // --- Anthropic Models ---
+  "claude-3-5-sonnet": {
+    input_cost_per_token: 3.0 / 1_000_000,
+    output_cost_per_token: 15.0 / 1_000_000,
+    provider: "anthropic",
+  },
+  "claude-3.5-sonnet": {
+    input_cost_per_token: 3.0 / 1_000_000,
+    output_cost_per_token: 15.0 / 1_000_000,
+    provider: "anthropic",
+  },
+  "claude-3-haiku": {
+    input_cost_per_token: 0.8 / 1_000_000,
+    output_cost_per_token: 4.0 / 1_000_000,
+    provider: "anthropic",
+  },
+  "claude-3.5-haiku": {
+    input_cost_per_token: 0.8 / 1_000_000,
+    output_cost_per_token: 4.0 / 1_000_000,
+    provider: "anthropic",
+  },
+  "claude-3-opus": {
+    input_cost_per_token: 15.0 / 1_000_000,
+    output_cost_per_token: 75.0 / 1_000_000,
+    provider: "anthropic",
+  },
+
+  // --- Gemini Models ---
+  "gemini-1.5-pro": {
+    input_cost_per_token: 1.25 / 1_000_000,
+    output_cost_per_token: 5.0 / 1_000_000,
+    provider: "gemini",
+  },
+  "gemini-1.5-flash": {
+    input_cost_per_token: 0.075 / 1_000_000,
+    output_cost_per_token: 0.3 / 1_000_000,
+    provider: "gemini",
+  },
+  "gemini-2.0-flash": {
+    input_cost_per_token: 0.10 / 1_000_000,
+    output_cost_per_token: 0.4 / 1_000_000,
+    provider: "gemini",
+  },
 };
 
 function getCorsHeaders() {
@@ -121,19 +173,39 @@ export async function POST(req: NextRequest) {
 
     const totalTokens = pTokens + cTokens;
 
-    // 4. Cost calculation logic
-    const pricing = MODEL_PRICING[model.toLowerCase()] || DEFAULT_PRICING;
-    const calculatedCost =
-      pTokens * pricing.input_cost_per_token + cTokens * pricing.output_cost_per_token;
-    const roundedCost = Number(calculatedCost.toFixed(6));
+    // 4. Cost calculation & is_estimated logic
+    const modelKey = String(model).toLowerCase().trim();
+    const pricing = MODEL_PRICING[modelKey];
+
+    let roundedCost = 0;
+    let isEstimated = false;
+    let provider = body.provider || "custom";
+
+    if (pricing) {
+      provider = pricing.provider;
+      const calculatedCost =
+        pTokens * pricing.input_cost_per_token + cTokens * pricing.output_cost_per_token;
+      roundedCost = Number(calculatedCost.toFixed(6));
+      isEstimated = false;
+    } else {
+      // Unknown or custom model
+      const explicitCost = body.cost ?? body.total_cost_usd ?? body.calculated_cost;
+      if (explicitCost !== undefined && explicitCost !== null && !isNaN(Number(explicitCost))) {
+        roundedCost = Number(Number(explicitCost).toFixed(6));
+        isEstimated = false;
+      } else {
+        roundedCost = 0;
+        isEstimated = true;
+      }
+    }
 
     const nowIso = new Date().toISOString();
 
     // 5. Construct log payload explicitly including user_id for DB schema
     const logPayload = {
       user_id: userId,
-      provider: body.provider || "openai",
-      model: model.toLowerCase(),
+      provider: provider,
+      model: modelKey,
       input_tokens: pTokens,
       output_tokens: cTokens,
       total_cost_usd: roundedCost,
@@ -159,7 +231,16 @@ export async function POST(req: NextRequest) {
         try {
           const { data: tData } = await supabaseAdmin
             .from("telemetry_logs")
-            .insert([{ ...logPayload, cost: roundedCost, total_tokens: totalTokens, prompt_tokens: pTokens, completion_tokens: cTokens }])
+            .insert([
+              {
+                ...logPayload,
+                cost: roundedCost,
+                total_tokens: totalTokens,
+                prompt_tokens: pTokens,
+                completion_tokens: cTokens,
+                is_estimated: isEstimated,
+              },
+            ])
             .select()
             .single();
           if (tData?.id) logId = tData.id;
@@ -176,11 +257,12 @@ export async function POST(req: NextRequest) {
       {
         success: true,
         log_id: logId,
-        model: model.toLowerCase(),
+        model: modelKey,
         prompt_tokens: pTokens,
         completion_tokens: cTokens,
         total_tokens: totalTokens,
         calculated_cost: roundedCost,
+        is_estimated: isEstimated,
         currency: "USD",
         timestamp: nowIso,
       },

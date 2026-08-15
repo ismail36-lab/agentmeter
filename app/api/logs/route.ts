@@ -6,6 +6,22 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const fetchCache = "force-no-store";
 
+const KNOWN_MODELS = new Set([
+  "gpt-4o",
+  "gpt-4o-mini",
+  "o1",
+  "o1-preview",
+  "o1-mini",
+  "claude-3-5-sonnet",
+  "claude-3.5-sonnet",
+  "claude-3-haiku",
+  "claude-3.5-haiku",
+  "claude-3-opus",
+  "gemini-1.5-pro",
+  "gemini-1.5-flash",
+  "gemini-2.0-flash",
+]);
+
 export async function GET(req: NextRequest) {
   const supabase = createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -54,12 +70,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: queryError.message }, { status: 500, headers: NO_CACHE_HEADERS });
     }
 
-    // Standardize log fields: created_at, model, prompt_tokens, completion_tokens, total_tokens, cost
+    // Standardize log fields: created_at, model, prompt_tokens, completion_tokens, total_tokens, cost, is_estimated
     const mappedLogs = logs.map((log) => {
       const pTokens = Number(log.prompt_tokens ?? log.input_tokens ?? 0);
       const cTokens = Number(log.completion_tokens ?? log.output_tokens ?? 0);
       const tTokens = Number(log.total_tokens ?? (pTokens + cTokens));
       const costVal = Number(log.cost ?? log.total_cost_usd ?? 0);
+      const modelName = String(log.model || "other").toLowerCase().trim();
+
+      const isExplicitlyEstimated = log.is_estimated === true || log.metadata?.is_estimated === true;
+      const isUnknownWithoutCost = !KNOWN_MODELS.has(modelName) && costVal === 0;
+      const isEstimated = isExplicitlyEstimated || isUnknownWithoutCost;
 
       return {
         id: log.id,
@@ -69,6 +90,7 @@ export async function GET(req: NextRequest) {
         completion_tokens: cTokens,
         total_tokens: tTokens,
         cost: costVal,
+        is_estimated: isEstimated,
         user_id: log.user_id,
       };
     });

@@ -64,6 +64,7 @@ interface UsageLog {
   total_tokens?: number;
   cost?: number;
   total_cost_usd?: number;
+  is_estimated?: boolean;
   api_key?: string;
   user_id?: string;
   metadata?: any;
@@ -1024,11 +1025,18 @@ export default function Dashboard() {
                           })}
                         </td>
                         <td className="py-3 px-4 whitespace-nowrap">
-                          <span
-                            className={`inline-flex items-center whitespace-nowrap shrink-0 max-w-full px-2.5 py-1 rounded-full text-[10px] font-semibold ${modelBadgeClass(log.model)}`}
-                          >
-                            {log.model}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`inline-flex items-center whitespace-nowrap shrink-0 max-w-full px-2.5 py-1 rounded-full text-[10px] font-semibold ${modelBadgeClass(log.model)}`}
+                            >
+                              {log.model}
+                            </span>
+                            {log.is_estimated && (
+                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber-950/70 text-amber-400 border border-amber-800/60 font-sans tracking-wide">
+                                Estimated
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-zinc-500">
                           {(log.prompt_tokens ?? log.input_tokens ?? 0).toLocaleString()}
