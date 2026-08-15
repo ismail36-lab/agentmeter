@@ -1,6 +1,6 @@
 async function testTelemetry() {
   try {
-    const response = await fetch('http://localhost:3000/api/v1/telemetry', {
+    const response = await fetch('https://agentmeter-umber.vercel.app/api/v1/telemetry', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
