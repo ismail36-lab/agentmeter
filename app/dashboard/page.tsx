@@ -53,12 +53,17 @@ interface ApiKeyItem {
 interface UsageLog {
   id: string;
   created_at: string;
+  timestamp?: string;
   model: string;
-  prompt_tokens: number;
-  completion_tokens: number;
-  total_tokens: number;
-  cost: number;
+  prompt_tokens?: number;
+  input_tokens?: number;
+  completion_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  cost?: number;
+  total_cost_usd?: number;
   api_key?: string;
+  user_id?: string;
   metadata?: any;
 }
 
@@ -188,27 +193,54 @@ export default function Dashboard() {
     }
   };
 
-  // 3. Fetch Raw Usage Logs for Table
+  // 3. Fetch Raw Telemetry Logs for Table
   const fetchLogs = async (uid?: string | null) => {
     setIsLoadingLogs(true);
     try {
+      const sessionRes = await supabase.auth.getSession();
+      const token = sessionRes.data.session?.access_token;
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      // 1. Fetch via /api/logs API route with cache bypass
+      const res = await fetch("/api/logs", { headers, cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.logs) {
+          setLogs(data.logs);
+          setIsLoadingLogs(false);
+          return;
+        }
+      }
+
+      // 2. Direct Supabase client query fallback for telemetry_logs
       const activeUid = uid ?? userId;
-      let query = supabase
-        .from("usage_logs")
+      let { data, error } = await supabase
+        .from("telemetry_logs")
         .select("*")
         .order("created_at", { ascending: false })
         .limit(100);
 
-      if (activeUid) {
-        query = query.eq("user_id", activeUid);
+      if (error || !data || data.length === 0) {
+        const uRes = await supabase
+          .from("usage_logs")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(100);
+        if (!uRes.error && uRes.data) {
+          data = uRes.data;
+          error = null;
+        }
       }
 
-      const { data, error } = await query;
       if (!error && data) {
-        setLogs(data);
+        const filtered = activeUid
+          ? data.filter((l: any) => !l.user_id || l.user_id === activeUid)
+          : data;
+        setLogs(filtered);
       }
     } catch (err) {
-      console.warn("Could not fetch usage_logs:", err);
+      console.warn("Could not fetch telemetry logs:", err);
     } finally {
       setIsLoadingLogs(false);
     }
@@ -971,7 +1003,7 @@ export default function Dashboard() {
                     filteredLogs.slice(0, 15).map((log) => (
                       <tr key={log.id} className="hover:bg-zinc-900/40 transition-colors">
                         <td className="py-3 px-4 text-zinc-500 whitespace-nowrap" suppressHydrationWarning>
-                          {new Date(log.created_at).toLocaleTimeString([], {
+                          {new Date(log.created_at || log.timestamp || Date.now()).toLocaleTimeString([], {
                             hour: "2-digit",
                             minute: "2-digit",
                             second: "2-digit",
@@ -984,13 +1016,17 @@ export default function Dashboard() {
                             {log.model}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-zinc-500">{log.prompt_tokens?.toLocaleString()}</td>
-                        <td className="py-3 px-4 text-zinc-500">{log.completion_tokens?.toLocaleString()}</td>
+                        <td className="py-3 px-4 text-zinc-500">
+                          {(log.prompt_tokens ?? log.input_tokens ?? 0).toLocaleString()}
+                        </td>
+                        <td className="py-3 px-4 text-zinc-500">
+                          {(log.completion_tokens ?? log.output_tokens ?? 0).toLocaleString()}
+                        </td>
                         <td className="py-3 px-4 font-semibold text-zinc-200">
-                          {log.total_tokens?.toLocaleString()}
+                          {(log.total_tokens ?? ((log.prompt_tokens ?? log.input_tokens ?? 0) + (log.completion_tokens ?? log.output_tokens ?? 0))).toLocaleString()}
                         </td>
                         <td className="py-3 px-4 text-right text-emerald-400 font-semibold">
-                          ${log.cost ? Number(log.cost).toFixed(6) : "0.000000"}
+                          ${Number(log.cost ?? log.total_cost_usd ?? 0).toFixed(6)}
                         </td>
                       </tr>
                     ))
