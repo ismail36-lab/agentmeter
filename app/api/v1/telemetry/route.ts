@@ -155,11 +155,20 @@ export async function POST(req: NextRequest) {
 
       if (logError) {
         console.warn("Supabase usage_logs insert notice:", logError.message);
+        // Fallback/secondary insert into telemetry_logs table
+        try {
+          const { data: tData } = await supabaseAdmin
+            .from("telemetry_logs")
+            .insert([{ ...logPayload, cost: roundedCost, total_tokens: totalTokens, prompt_tokens: pTokens, completion_tokens: cTokens }])
+            .select()
+            .single();
+          if (tData?.id) logId = tData.id;
+        } catch {}
       } else if (logData && logData.id) {
         logId = logData.id;
       }
     } catch (err) {
-      console.warn("Supabase usage_logs exception:", err);
+      console.warn("Supabase log insert exception:", err);
     }
 
     // 6. Return response
