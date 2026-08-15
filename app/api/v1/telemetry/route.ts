@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     try {
       const { data, error } = await supabaseAdmin
         .from("api_keys")
-        .select("id, name, user_id, is_active, status, key")
+        .select("id, name, user_id, is_active, key")
         .eq("key", apiKey)
         .maybeSingle();
 
@@ -77,7 +77,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (data) {
-        if (data.status === "inactive" || data.is_active === false) {
+        if (data.is_active === false) {
           return NextResponse.json(
             { error: "Unauthorized: API Key is inactive" },
             { status: 401, headers: getCorsHeaders() }
@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
       } else if (!error && apiKey.startsWith("am_test_")) {
         // Fallback for default test key
         apiKeyRecord = { id: "test_key_01", name: "Development Key", is_active: true };
-      } else if (data === null && !error) {
+      } else if (data === null) {
         keyAuthFailed = true;
       }
     } catch (err) {
@@ -146,7 +146,7 @@ export async function POST(req: NextRequest) {
     let logId = "log_" + Date.now() + "_" + Math.random().toString(36).substring(2, 8);
 
     try {
-      // Primary insert into usage_logs table
+      // Insert into usage_logs table
       const { data: logData, error: logError } = await supabaseAdmin
         .from("usage_logs")
         .insert([logPayload])

@@ -46,17 +46,17 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Query usage_logs filtered by user_id
+    // Query usage_logs filtered by user_id or orphan logs
     const { data: logs, error } = await supabaseAdmin
       .from("usage_logs")
       .select("*")
-      .eq("user_id", user.id)
+      .or(`user_id.eq.${user.id},user_id.is.null`)
       .order("created_at", { ascending: false })
       .limit(1000);
 
     if (error) {
       console.error("metrics GET query error:", error.message);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: error.message }, { status: 500, headers: NO_CACHE_HEADERS });
     }
 
     const userLogs = logs || [];
