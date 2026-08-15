@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-// DELETE /api/keys/:id — soft-revoke a key (set is_active = false)
+// DELETE /api/keys/:id — revoke (is_active = false) or delete key
 export async function DELETE(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -16,11 +16,25 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { error } = await supabaseAdmin
-    .from("api_keys")
-    .update({ is_active: false })
-    .eq("id", params.id)
-    .eq("user_id", user.id); // scoped to the owner — prevents cross-user revocation
+  const { searchParams } = new URL(req.url);
+  const isHardDelete = searchParams.get("hard") === "true";
+
+  let error;
+  if (isHardDelete) {
+    const res = await supabaseAdmin
+      .from("api_keys")
+      .delete()
+      .eq("id", params.id)
+      .eq("user_id", user.id);
+    error = res.error;
+  } else {
+    const res = await supabaseAdmin
+      .from("api_keys")
+      .update({ is_active: false })
+      .eq("id", params.id)
+      .eq("user_id", user.id);
+    error = res.error;
+  }
 
   if (error) {
     console.error("api_keys DELETE error:", error.message);

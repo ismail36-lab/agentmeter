@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { UsageTrendChart } from "@/components/charts/UsageTrendChart";
 import { ModelDistributionChart } from "@/components/charts/ModelDistributionChart";
+import { ApiKeyManagement } from "@/components/ApiKeyManagement";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -700,186 +701,22 @@ export default function Dashboard() {
         </div>
 
         {/* ── API Key Management Bento Card ─────────────────── */}
-        <div className="bento-card p-6 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2">
-                <Key className="h-4 w-4 text-emerald-400" />
-                API Key Management
-              </h3>
-              <p className="text-xs text-zinc-500 mt-0.5">
-                Generate and manage secret keys to send LLM telemetry payloads to AgentMeter.
-              </p>
-            </div>
-          </div>
-
-          {/* Create key form */}
-          <form onSubmit={handleCreateKey} className="flex flex-col sm:flex-row gap-3">
-            <input
-              type="text"
-              placeholder="Key label (e.g., Production Agent, Staging)"
-              value={newKeyName}
-              onChange={(e) => setNewKeyName(e.target.value)}
-              className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-2.5 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-emerald-500/60 transition-all font-mono"
-            />
-            <button
-              type="submit"
-              disabled={isCreatingKey}
-              className="py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-xs flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-500/10 disabled:opacity-40"
-            >
-              {isCreatingKey ? (
-                <>
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  <span>Generating…</span>
-                </>
-              ) : (
-                <>
-                  <Plus className="h-3.5 w-3.5" />
-                  <span>Generate New Key</span>
-                </>
-              )}
-            </button>
-          </form>
-
-          {/* Error notice */}
-          {keyError && (
-            <div className="flex items-center gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-mono">
-              <AlertCircle className="h-4 w-4 shrink-0" />
-              <span>{keyError}</span>
-            </div>
-          )}
-
-          {/* Newly created key banner */}
-          {newlyCreatedKey && (
-            <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs font-mono space-y-1">
-              <div className="flex items-center justify-between text-emerald-400 font-semibold">
-                <span>Secret Key Generated Successfully!</span>
-                <button
-                  type="button"
-                  onClick={() => copyToClipboard(newlyCreatedKey, "new_created_key")}
-                  className="p-1 rounded bg-emerald-950/60 text-emerald-300 hover:text-emerald-100 flex items-center gap-1"
-                >
-                  {copiedKeyId === "new_created_key" ? (
-                    <>
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                      <span>Copied!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="h-3.5 w-3.5" />
-                      <span>Copy Full Key</span>
-                    </>
-                  )}
-                </button>
-              </div>
-              <p className="text-zinc-300 break-all bg-zinc-950/80 p-2 rounded-lg border border-zinc-800 text-[11px]">
-                {newlyCreatedKey}
-              </p>
-              <p className="text-zinc-500 text-[10px]">
-                Copy this key now. For security, full keys are hidden after creation.
-              </p>
-            </div>
-          )}
-
-          {/* Keys list table */}
-          <div className="overflow-x-auto rounded-xl border border-zinc-800/80 bg-zinc-950/60">
-            <table className="w-full text-left text-xs font-mono">
-              <thead className="bg-zinc-900/60 text-zinc-500 uppercase tracking-wider text-[10px] border-b border-zinc-800">
-                <tr>
-                  <th className="py-3 px-4">Key Name</th>
-                  <th className="py-3 px-4">Secret Key</th>
-                  <th className="py-3 px-4">Created</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-800/60 text-zinc-300">
-                {isLoadingKeys ? (
-                  <tr>
-                    <td colSpan={5} className="py-6 text-center text-zinc-500">
-                      <Loader2 className="h-4 w-4 animate-spin inline mr-2 text-emerald-400" />
-                      Loading API keys…
-                    </td>
-                  </tr>
-                ) : apiKeys.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="py-6 text-center text-zinc-500">
-                      No active API keys found. Click &quot;Generate New Key&quot; above to create one.
-                    </td>
-                  </tr>
-                ) : (
-                  apiKeys.map((item) => {
-                    const isVisible = Boolean(visibleKeyIds[item.id]);
-                    const displayKey = isVisible
-                      ? item.key
-                      : item.key.slice(0, 10) + "••••••••••••••••••••";
-
-                    return (
-                      <tr key={item.id} className="hover:bg-zinc-900/40 transition-colors">
-                        <td className="py-3 px-4 font-semibold text-zinc-200">{item.name}</td>
-                        <td className="py-3 px-4 text-zinc-400 font-mono">
-                          <div className="flex items-center gap-2">
-                            <span>{displayKey}</span>
-                            <button
-                              type="button"
-                              onClick={() => toggleKeyVisibility(item.id)}
-                              className="text-zinc-600 hover:text-zinc-300 transition-colors"
-                              title={isVisible ? "Hide Key" : "Show Key"}
-                            >
-                              {isVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                            </button>
-                          </div>
-                        </td>
-                        <td className="py-3 px-4 text-zinc-500">
-                          {new Date(item.created_at).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "2-digit",
-                            year: "numeric",
-                          })}
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                            Active
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => copyToClipboard(item.key, item.id)}
-                              className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-50 transition-colors border border-zinc-800"
-                              title="Copy Key"
-                            >
-                              {copiedKeyId === item.id ? (
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-                              ) : (
-                                <Copy className="h-3.5 w-3.5" />
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRevokeKey(item.id)}
-                              disabled={revokingKeyId === item.id}
-                              className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 transition-colors border border-red-500/20 disabled:opacity-40"
-                              title="Revoke Key"
-                            >
-                              {revokingKeyId === item.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-3.5 w-3.5" />
-                              )}
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <ApiKeyManagement
+          apiKeys={apiKeys}
+          isLoading={isLoadingKeys}
+          onRefresh={fetchApiKeys}
+          onKeyCreated={(newKey) => {
+            setApiKeys((prev) => [newKey, ...prev]);
+            setTestApiKey(newKey.key);
+          }}
+          onKeyRevoked={(keyId) => {
+            setApiKeys((prev) => prev.filter((k) => k.id !== keyId));
+            if (testApiKey && apiKeys.find((k) => k.id === keyId)?.key === testApiKey) {
+              const remaining = apiKeys.filter((k) => k.id !== keyId);
+              setTestApiKey(remaining.length > 0 ? remaining[0].key : "");
+            }
+          }}
+        />
 
         {/* ── Charts Row ─────────────────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

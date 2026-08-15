@@ -154,6 +154,48 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // 2b. Quota Limit Enforcement: Fetch organization plan & count monthly logs
+    let userPlan = "free";
+    if (userId) {
+      try {
+        const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
+        if (userData?.user?.user_metadata?.plan) {
+          userPlan = String(userData.user.user_metadata.plan).toLowerCase();
+        }
+      } catch (err) {
+        console.warn("Could not fetch user metadata for quota check:", err);
+      }
+    }
+
+    const QUOTA_LIMITS: Record<string, number> = {
+      free: 1000,
+      pro: 250000,
+    };
+    const monthlyLimit = QUOTA_LIMITS[userPlan] ?? 1000;
+
+    const nowForQuota = new Date();
+    const firstDayOfMonth = new Date(nowForQuota.getFullYear(), nowForQuota.getMonth(), 1).toISOString();
+
+    let monthlyCount = 0;
+    try {
+      const { count } = await supabaseAdmin
+        .from("usage_logs")
+        .select("id", { count: "exact", head: true })
+        .or(userId ? `user_id.eq.${userId},user_id.is.null` : "user_id.is.null")
+        .gte("created_at", firstDayOfMonth);
+
+      monthlyCount = count ?? 0;
+    } catch (err) {
+      console.warn("Quota usage count notice:", err);
+    }
+
+    if (monthlyCount >= monthlyLimit) {
+      return NextResponse.json(
+        { error: "Monthly log quota exceeded. Upgrade to Pro for higher limits." },
+        { status: 429, headers: getCorsHeaders() }
+      );
+    }
+
     // 3. Parse JSON Body
     const body = await req.json();
     const { model, prompt_tokens, completion_tokens, input_tokens, output_tokens, metadata } = body;
