@@ -708,7 +708,7 @@ export default function Dashboard() {
             <UsageTrendChart data={dailyTrend} />
           </div>
           <div className="lg:col-span-1">
-            <ModelDistributionChart data={modelBreakdown} />
+            <ModelDistributionChart data={modelBreakdown} totalSpend={metrics.totalSpend} />
           </div>
         </div>
 
@@ -729,117 +729,6 @@ export default function Dashboard() {
             }
           }}
         />
-
-        {/* ── Charts Row ─────────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-          {/* Area Chart */}
-          <div className="lg:col-span-2 bento-card p-6 flex flex-col">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2">
-                  <Activity className="h-4 w-4 text-emerald-400" />
-                  Daily Spend Analytics
-                </h3>
-                <p className="text-xs text-zinc-500 mt-0.5">Real-time spend progression (USD) from Supabase logs</p>
-              </div>
-              <span className="text-[11px] font-mono px-2.5 py-1 rounded-md bg-zinc-900 text-zinc-400 border border-zinc-800">
-                Last 7 Days
-              </span>
-            </div>
-
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={dailyTrend} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="spendGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.25} />
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#27272a" vertical={false} />
-                  <XAxis dataKey="date" stroke="#52525b" fontSize={11} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#52525b" fontSize={11} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#18181b",
-                      borderColor: "#3f3f46",
-                      borderRadius: "0.75rem",
-                      color: "#fafafa",
-                      fontSize: "12px",
-                    }}
-                    formatter={(val: any) => [`$${val}`, "Spend"]}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="spend"
-                    stroke="#10b981"
-                    strokeWidth={2}
-                    fillOpacity={1}
-                    fill="url(#spendGradient)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Donut Chart */}
-          <div className="bento-card p-6 flex flex-col">
-            <div className="mb-4">
-              <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2">
-                <Layers className="h-4 w-4 text-sky-400" />
-                Model Cost Breakdown
-              </h3>
-              <p className="text-xs text-zinc-500 mt-0.5">Share of total spend by LLM model</p>
-            </div>
-
-            <div className="h-52 w-full flex items-center justify-center relative">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={modelBreakdown.length > 0 ? modelBreakdown : [{ name: "No data", value: 1, color: "#27272a" }]}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={52}
-                    outerRadius={76}
-                    paddingAngle={3}
-                    dataKey="value"
-                  >
-                    {(modelBreakdown.length > 0 ? modelBreakdown : [{ name: "No data", value: 1, color: "#27272a" }]).map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} stroke="#121214" strokeWidth={2} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "#18181b",
-                      borderColor: "#3f3f46",
-                      borderRadius: "0.75rem",
-                      color: "#fafafa",
-                      fontSize: "12px",
-                    }}
-                    formatter={(val: any) => [`$${val}`, "Cost"]}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Total</span>
-                <span className="text-base font-bold text-zinc-50">${metrics.totalSpend.toFixed(2)}</span>
-              </div>
-            </div>
-
-            <div className="mt-4 space-y-2">
-              {modelBreakdown.map((item) => (
-                <div key={item.name} className="flex items-center justify-between text-xs font-mono">
-                  <div className="flex items-center gap-2">
-                    <span className="h-2 w-2 rounded-full shrink-0" style={{ backgroundColor: item.color }} />
-                    <span className="text-zinc-400">{item.name}</span>
-                  </div>
-                  <span className="text-zinc-500">${item.value.toFixed(4)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
 
         {/* ── Playground + Table ─────────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

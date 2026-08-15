@@ -18,6 +18,7 @@ export interface ModelBreakdownItem {
 
 interface ModelDistributionChartProps {
   data: ModelBreakdownItem[];
+  totalSpend?: number;
 }
 
 const DEFAULT_COLORS: Record<string, string> = {
@@ -27,7 +28,7 @@ const DEFAULT_COLORS: Record<string, string> = {
   other: "#f59e0b",             // amber-500
 };
 
-export function ModelDistributionChart({ data }: ModelDistributionChartProps) {
+export function ModelDistributionChart({ data, totalSpend }: ModelDistributionChartProps) {
   const chartData = (data && data.length > 0 ? data : [])
     .filter((item) => item.value > 0)
     .map((item) => ({
@@ -36,7 +37,8 @@ export function ModelDistributionChart({ data }: ModelDistributionChartProps) {
       color: item.color || DEFAULT_COLORS[item.name] || DEFAULT_COLORS.other,
     }));
 
-  const totalCost = chartData.reduce((acc, curr) => acc + curr.value, 0);
+  const calculatedTotal = chartData.reduce((acc, curr) => acc + curr.value, 0);
+  const displayTotal = totalSpend !== undefined && totalSpend > 0 ? totalSpend : calculatedTotal;
 
   return (
     <div className="bento-card p-6 flex flex-col justify-between h-[360px]">
@@ -79,12 +81,12 @@ export function ModelDistributionChart({ data }: ModelDistributionChartProps) {
                     if (active && payload && payload.length) {
                       const dataItem = payload[0];
                       const val = Number(dataItem.value);
-                      const pct = totalCost > 0 ? ((val / totalCost) * 100).toFixed(1) : "0";
+                      const pct = displayTotal > 0 ? ((val / displayTotal) * 100).toFixed(1) : "0";
                       return (
                         <div className="bg-zinc-900 border border-zinc-800 p-2.5 rounded-lg shadow-xl text-xs font-mono">
                           <p className="text-zinc-200 font-semibold mb-1">{dataItem.name}</p>
                           <p className="text-emerald-400 font-bold">
-                            ${val.toFixed(6)} ({pct}%)
+                            ${val.toFixed(4)} ({pct}%)
                           </p>
                         </div>
                       );
@@ -98,7 +100,7 @@ export function ModelDistributionChart({ data }: ModelDistributionChartProps) {
             {/* Donut Center Overlay Label */}
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
               <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-500">Total</span>
-              <span className="text-sm font-bold font-mono text-zinc-100">${totalCost.toFixed(4)}</span>
+              <span className="text-sm font-bold font-mono text-zinc-100">${displayTotal.toFixed(4)}</span>
             </div>
           </div>
         )}
