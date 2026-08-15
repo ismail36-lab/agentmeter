@@ -172,7 +172,7 @@ export default function Dashboard() {
       const headers: Record<string, string> = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const res = await fetch("/api/metrics", { headers });
+      const res = await fetch("/api/metrics", { headers, cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         if (data.metrics) setMetrics(data.metrics);

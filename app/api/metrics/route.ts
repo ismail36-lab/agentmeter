@@ -3,6 +3,8 @@ import { createClient } from "@/utils/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 const MODEL_COLORS: Record<string, string> = {
   "gpt-4o": "#10b981",          // emerald-500
@@ -33,8 +35,14 @@ export async function GET(req: NextRequest) {
   const supabase = createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 
+  const NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, max-age=0",
+    "CDN-Cache-Control": "no-store",
+    "Vercel-CDN-Cache-Control": "no-store",
+  };
+
   if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_CACHE_HEADERS });
   }
 
   try {
@@ -119,18 +127,21 @@ export async function GET(req: NextRequest) {
       color: MODEL_COLORS[name] || MODEL_COLORS.other,
     }));
 
-    return NextResponse.json({
-      metrics: {
-        totalSpend: Number(totalSpend.toFixed(4)),
-        totalTokens,
-        totalRequests,
-        topModel,
+    return NextResponse.json(
+      {
+        metrics: {
+          totalSpend: Number(totalSpend.toFixed(4)),
+          totalTokens,
+          totalRequests,
+          topModel,
+        },
+        dailyTrend,
+        modelBreakdown,
       },
-      dailyTrend,
-      modelBreakdown,
-    });
+      { headers: NO_CACHE_HEADERS }
+    );
   } catch (err: any) {
     console.error("metrics GET exception:", err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
   }
 }
