@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import React, { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   DollarSign,
   Cpu,
@@ -28,6 +29,7 @@ import {
   Eye,
   EyeOff,
   TrendingUp,
+  BookOpen,
 } from "lucide-react";
 import { UsageTrendChart } from "@/components/charts/UsageTrendChart";
 import { ModelDistributionChart } from "@/components/charts/ModelDistributionChart";
@@ -489,6 +491,16 @@ export default function Dashboard() {
             >
               <RefreshCw className={`h-4 w-4 ${isGlobalLoading ? "animate-spin text-emerald-400" : ""}`} />
             </button>
+
+            {/* Developer Docs Link */}
+            <Link
+              href="/docs"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-xs text-zinc-300 hover:text-zinc-50 transition-colors"
+              title="Developer Documentation"
+            >
+              <BookOpen className="h-3.5 w-3.5 text-emerald-400" />
+              <span className="hidden sm:inline font-medium">Docs</span>
+            </Link>
 
             {/* User email chip & Plan badge */}
             {userEmail && (

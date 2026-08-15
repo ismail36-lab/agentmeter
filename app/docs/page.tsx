@@ -1,0 +1,442 @@
+"use client";
+
+export const dynamic = "force-dynamic";
+
+import React, { useState } from "react";
+import Link from "next/link";
+import {
+  Zap,
+  BookOpen,
+  ArrowLeft,
+  Copy,
+  CheckCircle2,
+  Terminal,
+  Code2,
+  Cpu,
+  ShieldCheck,
+  Globe,
+  Layers,
+  FileCode,
+  Check,
+} from "lucide-react";
+
+export default function DocsPage() {
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyToClipboard = (code: string, id: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const pythonInstallCode = `pip install agentmeter`;
+
+  const pythonSnippet = `from agentmeter import AgentMeter
+
+# Initialize AgentMeter client with your secret API key
+meter = AgentMeter(api_key="am_your_api_key_here")
+
+# 1. Log telemetry payload manually after an LLM call
+response = meter.log_usage(
+    model="gpt-4o",
+    prompt_tokens=1250,
+    completion_tokens=480,
+    metadata={
+        "environment": "production",
+        "agent_name": "CustomerSupportAgent",
+        "user_id": "usr_99182"
+    }
+)
+print("AgentMeter Ingestion Status:", response)
+
+# 2. Or use the trace context manager to automatically track latency
+with meter.trace(model="claude-3-5-sonnet", metadata={"workflow": "code_review"}) as t:
+    # Perform your LLM completion call here
+    pass`;
+
+  const nodeInstallCode = `npm install agentmeter-sdk`;
+
+  const nodeSnippet = `import { AgentMeter } from "agentmeter-sdk";
+
+// Initialize client with secret API key
+const meter = new AgentMeter({
+  apiKey: process.env.AGENTMETER_API_KEY || "am_your_api_key_here",
+});
+
+async function runAgent() {
+  // Send LLM completion telemetry payload
+  const result = await meter.logUsage({
+    model: "gpt-4o",
+    prompt_tokens: 1500,
+    completion_tokens: 450,
+    metadata: {
+      environment: "production",
+      session_id: "sess_881923"
+    }
+  });
+
+  console.log("Telemetry ingested successfully:", result);
+}
+
+runAgent();`;
+
+  const curlSnippet = `curl -X POST https://agentmeter.app/api/v1/telemetry \\
+  -H "Authorization: Bearer am_your_api_key_here" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "gpt-4o",
+    "prompt_tokens": 1500,
+    "completion_tokens": 450,
+    "metadata": {
+      "environment": "production",
+      "agent_name": "SupportAgent"
+    }
+  }'`;
+
+  const jsonResponseSnippet = `{
+  "success": true,
+  "log_id": "c5cf61ee-6ff6-4f73-a1e7-e75ca9601324",
+  "model": "gpt-4o",
+  "prompt_tokens": 1500,
+  "completion_tokens": 450,
+  "total_tokens": 1950,
+  "calculated_cost": 0.00825,
+  "is_estimated": false,
+  "currency": "USD",
+  "timestamp": "2026-08-15T10:23:00.000Z"
+}`;
+
+  return (
+    <div className="min-h-screen bg-[#09090b] text-zinc-50 flex flex-col font-sans selection:bg-emerald-500/20">
+
+      {/* ── Navbar ─────────────────────────────────────────────── */}
+      <header className="sticky top-0 z-50 border-b border-zinc-800/80 bg-[#09090b]/80 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="h-9 w-9 rounded-xl bg-zinc-900 border border-zinc-700/80 flex items-center justify-center">
+              <Zap className="h-4.5 w-4.5 text-emerald-400" />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-lg font-semibold tracking-tight text-zinc-50">
+                AgentMeter
+              </span>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                Developer Documentation
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <Link
+              href="/dashboard"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-300 hover:text-zinc-50 transition-colors"
+            >
+              <ArrowLeft className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Back to Dashboard</span>
+            </Link>
+          </div>
+        </div>
+      </header>
+
+      {/* ── Main Container ─────────────────────────────────────── */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+        
+        {/* Banner */}
+        <div className="bento-card p-6 border border-zinc-800 bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950">
+          <div className="flex items-start justify-between">
+            <div className="space-y-2">
+              <h1 className="text-2xl font-bold text-zinc-50 tracking-tight flex items-center gap-2">
+                <BookOpen className="h-6 w-6 text-emerald-400" />
+                Integration &amp; API Reference
+              </h1>
+              <p className="text-sm text-zinc-400 max-w-3xl leading-relaxed">
+                Connect your AI agents and LLM backend pipelines to AgentMeter. Real-time cost calculation, token metering, and telemetry aggregation in under 2 minutes.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Quick Links Navigation */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <a
+            href="#python-sdk"
+            className="bento-card p-4 hover:border-emerald-500/50 transition-all group flex items-center gap-3"
+          >
+            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:scale-105 transition-transform">
+              <FileCode className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-zinc-200">Python SDK</h3>
+              <p className="text-[11px] text-zinc-500">pip install agentmeter</p>
+            </div>
+          </a>
+
+          <a
+            href="#nodejs-sdk"
+            className="bento-card p-4 hover:border-sky-500/50 transition-all group flex items-center gap-3"
+          >
+            <div className="p-2.5 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20 group-hover:scale-105 transition-transform">
+              <Code2 className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-zinc-200">Node.js / TypeScript</h3>
+              <p className="text-[11px] text-zinc-500">npm install agentmeter-sdk</p>
+            </div>
+          </a>
+
+          <a
+            href="#rest-api"
+            className="bento-card p-4 hover:border-violet-500/50 transition-all group flex items-center gap-3"
+          >
+            <div className="p-2.5 rounded-xl bg-violet-500/10 text-violet-400 border border-violet-500/20 group-hover:scale-105 transition-transform">
+              <Globe className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-zinc-200">REST API</h3>
+              <p className="text-[11px] text-zinc-500">POST /api/v1/telemetry</p>
+            </div>
+          </a>
+        </div>
+
+        {/* ── Section 1: Python SDK ───────────────────────────── */}
+        <section id="python-sdk" className="bento-card p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+            <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+              <FileCode className="h-4.5 w-4.5 text-emerald-400" />
+              1. Python SDK Integration Guide
+            </h2>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              Python 3.8+
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            <p className="text-xs text-zinc-400">
+              Install the official AgentMeter Python package from PyPI:
+            </p>
+            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 font-mono text-xs text-emerald-400 flex items-center justify-between">
+              <span>{pythonInstallCode}</span>
+              <button
+                onClick={() => copyToClipboard(pythonInstallCode, "py_install")}
+                className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
+                title="Copy package command"
+              >
+                {copiedId === "py_install" ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs text-zinc-400">
+              Initialize the client and send telemetry logs after calling OpenAI, Anthropic, or custom LLM endpoints:
+            </p>
+            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-4 font-mono text-xs text-zinc-300 overflow-x-auto">
+              <button
+                onClick={() => copyToClipboard(pythonSnippet, "py_snippet")}
+                className="absolute right-3 top-3 p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
+                title="Copy code snippet"
+              >
+                {copiedId === "py_snippet" ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+              <pre className="text-zinc-200 leading-relaxed">{pythonSnippet}</pre>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Section 2: Node.js / TypeScript ───────────────── */}
+        <section id="nodejs-sdk" className="bento-card p-6 space-y-4">
+          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+            <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+              <Code2 className="h-4.5 w-4.5 text-sky-400" />
+              2. Node.js / TypeScript SDK Integration Guide
+            </h2>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20">
+              Node.js 16+
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            <p className="text-xs text-zinc-400">
+              Install the Node.js SDK via npm or yarn:
+            </p>
+            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 font-mono text-xs text-sky-400 flex items-center justify-between">
+              <span>{nodeInstallCode}</span>
+              <button
+                onClick={() => copyToClipboard(nodeInstallCode, "node_install")}
+                className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
+                title="Copy package command"
+              >
+                {copiedId === "node_install" ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs text-zinc-400">
+              Import and initialize the client in your backend application or Next.js API routes:
+            </p>
+            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-4 font-mono text-xs text-zinc-300 overflow-x-auto">
+              <button
+                onClick={() => copyToClipboard(nodeSnippet, "node_snippet")}
+                className="absolute right-3 top-3 p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
+                title="Copy code snippet"
+              >
+                {copiedId === "node_snippet" ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+              <pre className="text-zinc-200 leading-relaxed">{nodeSnippet}</pre>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Section 3: REST API Reference ──────────────────── */}
+        <section id="rest-api" className="bento-card p-6 space-y-5">
+          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+            <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
+              <Globe className="h-4.5 w-4.5 text-violet-400" />
+              3. REST API Reference: Ingestion Endpoint
+            </h2>
+            <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
+              POST /api/v1/telemetry
+            </span>
+          </div>
+
+          {/* Headers */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Required HTTP Headers</h3>
+            <div className="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-950 p-4 font-mono text-xs">
+              <div className="space-y-1.5 text-zinc-300">
+                <div className="flex items-center gap-2">
+                  <span className="text-violet-400 font-semibold">Authorization:</span>
+                  <span>Bearer &lt;YOUR_API_KEY&gt;</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-violet-400 font-semibold">Content-Type:</span>
+                  <span>application/json</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Payload Parameters Table */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">JSON Request Payload Fields</h3>
+            <div className="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-950">
+              <table className="w-full text-left text-xs font-mono">
+                <thead className="bg-zinc-900 text-zinc-400 uppercase text-[10px] border-b border-zinc-800">
+                  <tr>
+                    <th className="py-2.5 px-4">Field</th>
+                    <th className="py-2.5 px-4">Type</th>
+                    <th className="py-2.5 px-4">Required</th>
+                    <th className="py-2.5 px-4">Description</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-800/80 text-zinc-300">
+                  <tr>
+                    <td className="py-2.5 px-4 font-semibold text-emerald-400">model</td>
+                    <td className="py-2.5 px-4 text-zinc-500">string</td>
+                    <td className="py-2.5 px-4 text-emerald-400">Yes</td>
+                    <td className="py-2.5 px-4 text-zinc-400">LLM model name (e.g. <code className="text-zinc-200">gpt-4o</code>, <code className="text-zinc-200">gpt-4o-mini</code>, <code className="text-zinc-200">claude-3-5-sonnet</code>).</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2.5 px-4 font-semibold text-emerald-400">prompt_tokens</td>
+                    <td className="py-2.5 px-4 text-zinc-500">integer</td>
+                    <td className="py-2.5 px-4 text-emerald-400">Yes*</td>
+                    <td className="py-2.5 px-4 text-zinc-400">Number of prompt / input tokens processed (*or alias <code className="text-zinc-200">input_tokens</code>).</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2.5 px-4 font-semibold text-emerald-400">completion_tokens</td>
+                    <td className="py-2.5 px-4 text-zinc-500">integer</td>
+                    <td className="py-2.5 px-4 text-emerald-400">Yes*</td>
+                    <td className="py-2.5 px-4 text-zinc-400">Number of completion / output tokens generated (*or alias <code className="text-zinc-200">output_tokens</code>).</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2.5 px-4 font-semibold text-sky-400">metadata</td>
+                    <td className="py-2.5 px-4 text-zinc-500">object</td>
+                    <td className="py-2.5 px-4 text-zinc-500">Optional</td>
+                    <td className="py-2.5 px-4 text-zinc-400">Custom metadata key-value tags (e.g. <code className="text-zinc-200">environment</code>, <code className="text-zinc-200">agent_id</code>).</td>
+                  </tr>
+                  <tr>
+                    <td className="py-2.5 px-4 font-semibold text-sky-400">latency_ms</td>
+                    <td className="py-2.5 px-4 text-zinc-500">number</td>
+                    <td className="py-2.5 px-4 text-zinc-500">Optional</td>
+                    <td className="py-2.5 px-4 text-zinc-400">LLM request round-trip latency in milliseconds.</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Curl Sample */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Example cURL Command</h3>
+            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-4 font-mono text-xs text-zinc-300 overflow-x-auto">
+              <button
+                onClick={() => copyToClipboard(curlSnippet, "curl_snippet")}
+                className="absolute right-3 top-3 p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
+                title="Copy cURL snippet"
+              >
+                {copiedId === "curl_snippet" ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+              <pre className="text-zinc-200 leading-relaxed">{curlSnippet}</pre>
+            </div>
+          </div>
+
+          {/* Success Response Sample */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Successful Response (200 OK)</h3>
+            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-4 font-mono text-xs text-emerald-400 overflow-x-auto">
+              <button
+                onClick={() => copyToClipboard(jsonResponseSnippet, "json_res")}
+                className="absolute right-3 top-3 p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
+                title="Copy JSON response"
+              >
+                {copiedId === "json_res" ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+              <pre className="leading-relaxed">{jsonResponseSnippet}</pre>
+            </div>
+          </div>
+
+          {/* Status Codes Notice */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs">
+              <div className="font-bold font-mono text-emerald-400">200 Success</div>
+              <p className="text-[11px] text-zinc-400 mt-1">Payload validated, cost calculated, and log stored in Supabase.</p>
+            </div>
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs">
+              <div className="font-bold font-mono text-amber-400">401 Unauthorized</div>
+              <p className="text-[11px] text-zinc-400 mt-1">Invalid or revoked secret key provided in Authorization header.</p>
+            </div>
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs">
+              <div className="font-bold font-mono text-rose-400">429 Quota Exceeded</div>
+              <p className="text-[11px] text-zinc-400 mt-1">Monthly log quota limit reached for organization plan tier.</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
