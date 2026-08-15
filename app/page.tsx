@@ -1,4 +1,9 @@
+"use client";
+
+import React, { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 import {
   Check,
   Zap,
@@ -9,16 +14,12 @@ import {
   Webhook,
   Users,
   HelpCircle,
+  Loader2,
 } from "lucide-react";
-
-export const metadata = {
-  title: "AgentMeter — LLM Usage Metering & Cost Intelligence",
-  description:
-    "Real-time token tracking, precise cost attribution, and usage metering for every LLM API call across OpenAI, Anthropic, and Gemini.",
-};
 
 const PLANS = [
   {
+    key: "free",
     name: "Free",
     price: "$0",
     period: "/mo",
@@ -26,7 +27,6 @@ const PLANS = [
     highlight: false,
     badge: null,
     cta: "Get Started",
-    ctaHref: "/login",
     features: [
       { label: "1,000 logs / month", icon: TrendingUp },
       { label: "3-day data retention", icon: Clock },
@@ -46,6 +46,7 @@ const PLANS = [
     },
   },
   {
+    key: "pro",
     name: "Pro",
     price: "$49",
     period: "/mo",
@@ -53,7 +54,6 @@ const PLANS = [
     highlight: true,
     badge: "Most Popular",
     cta: "Start Pro Trial",
-    ctaHref: "/login",
     features: [
       { label: "250,000 logs / month included", icon: TrendingUp },
       { label: "$0.10 / 1,000 extra logs (PAYG)", icon: Zap },
@@ -74,6 +74,7 @@ const PLANS = [
     },
   },
   {
+    key: "enterprise",
     name: "Enterprise",
     price: "$299",
     period: "/mo",
@@ -81,7 +82,6 @@ const PLANS = [
     highlight: false,
     badge: "Best Value at Scale",
     cta: "Talk to Sales",
-    ctaHref: "mailto:sales@agentmeter.io",
     features: [
       { label: "1,000,000+ logs / month (Volume Discounts)", icon: TrendingUp },
       { label: "$0.05 / 1,000 extra logs (negotiated)", icon: Zap },
@@ -116,6 +116,38 @@ const COMPARISON_ROWS = [
 ] as const;
 
 export default function Home() {
+  const router = useRouter();
+  const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+
+  const handleSelectPlan = async (planKey: string) => {
+    if (planKey === "enterprise") {
+      window.location.href = "mailto:sales@agentmeter.io";
+      return;
+    }
+
+    setLoadingPlan(planKey);
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data.session?.user) {
+        // User logged in: update plan via API
+        const res = await fetch("/api/plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ plan: planKey }),
+        });
+        if (res.ok) {
+          router.push("/dashboard");
+          return;
+        }
+      }
+      router.push(`/login?plan=${planKey}`);
+    } catch {
+      router.push(`/login?plan=${planKey}`);
+    } finally {
+      setLoadingPlan(null);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-50 antialiased">
       {/* ── Nav ─────────────────────────────────────────────── */}
@@ -142,7 +174,7 @@ export default function Home() {
       <section className="pt-28 pb-20 px-4 sm:px-6 text-center max-w-4xl mx-auto">
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-950/60 border border-emerald-900/60 text-emerald-400 text-xs font-mono mb-6">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          Now supporting OpenAI, Anthropic & Gemini
+          Now supporting OpenAI, Anthropic &amp; Gemini
         </div>
         <h1 className="text-4xl sm:text-6xl font-bold tracking-tight leading-tight mb-6">
           LLM Cost Intelligence
@@ -155,12 +187,12 @@ export default function Home() {
           the surprise invoices.
         </p>
         <div className="flex flex-wrap items-center justify-center gap-4">
-          <Link
-            href="/login"
+          <button
+            onClick={() => handleSelectPlan("free")}
             className="px-6 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-sm transition-all hover:shadow-lg hover:shadow-emerald-500/20"
           >
             Start for Free
-          </Link>
+          </button>
           <Link
             href="/dashboard"
             className="px-6 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-semibold text-sm transition-colors"
@@ -215,17 +247,19 @@ export default function Home() {
                   <p className="text-xs text-zinc-500 mt-1">{plan.subtitle}</p>
                 </div>
 
-                {/* CTA */}
-                <Link
-                  href={plan.ctaHref}
-                  className={`w-full text-center py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                {/* CTA Button */}
+                <button
+                  onClick={() => handleSelectPlan(plan.key)}
+                  disabled={loadingPlan === plan.key}
+                  className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                     plan.highlight
                       ? "bg-emerald-500 hover:bg-emerald-400 text-zinc-950 shadow-md shadow-emerald-900/30"
                       : "bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700/60"
                   }`}
                 >
+                  {loadingPlan === plan.key && <Loader2 className="h-4 w-4 animate-spin inline" />}
                   {plan.cta}
-                </Link>
+                </button>
 
                 {/* Feature List */}
                 <ul className="flex flex-col gap-3 flex-1">
@@ -345,7 +379,7 @@ export default function Home() {
 
       {/* ── Footer ─────────────────────────────────────────────── */}
       <footer className="border-t border-zinc-900 py-8 text-center text-xs text-zinc-600 font-mono">
-        <p>AgentMeter © 2026 • LLM Telemetry Infrastructure • Powered by Next.js & Supabase</p>
+        <p>AgentMeter © 2026 • LLM Telemetry Infrastructure • Powered by Next.js &amp; Supabase</p>
       </footer>
     </div>
   );

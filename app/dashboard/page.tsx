@@ -27,6 +27,7 @@ import {
   AlertCircle,
   Eye,
   EyeOff,
+  TrendingUp,
 } from "lucide-react";
 import { UsageTrendChart } from "@/components/charts/UsageTrendChart";
 import { ModelDistributionChart } from "@/components/charts/ModelDistributionChart";
@@ -137,6 +138,72 @@ export default function Dashboard() {
   const [revokingKeyId, setRevokingKeyId] = useState<string | null>(null);
   const [copiedKeyId, setCopiedKeyId] = useState<string | null>(null);
   const [visibleKeyIds, setVisibleKeyIds] = useState<Record<string, boolean>>({});
+
+  // Plan & Tier Limits State
+  const [planDetails, setPlanDetails] = useState<{
+    plan: string;
+    tierName: string;
+    limit: number;
+    limitLabel: string;
+    usage: number;
+    percentage: number;
+    remaining: number;
+  }>({
+    plan: "free",
+    tierName: "Free Sandbox",
+    limit: 1000,
+    limitLabel: "1,000 logs/mo",
+    usage: 0,
+    percentage: 0,
+    remaining: 1000,
+  });
+  const [isSwitchingPlan, setIsSwitchingPlan] = useState(false);
+
+  // Fetch Current Plan & Tier Usage
+  const fetchPlanDetails = async () => {
+    try {
+      const sessionRes = await supabase.auth.getSession();
+      const token = sessionRes.data.session?.access_token;
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch("/api/plan", { headers, cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.plan) {
+          setPlanDetails(data);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch plan details:", err);
+    }
+  };
+
+  // Toggle Plan between Free Sandbox & Pro Tier
+  const handleTogglePlan = async () => {
+    setIsSwitchingPlan(true);
+    try {
+      const newPlan = planDetails.plan === "pro" ? "free" : "pro";
+      const sessionRes = await supabase.auth.getSession();
+      const token = sessionRes.data.session?.access_token;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch("/api/plan", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ plan: newPlan }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.plan) setPlanDetails(data);
+      }
+    } catch (err) {
+      console.warn("Could not update plan:", err);
+    } finally {
+      setIsSwitchingPlan(false);
+    }
+  };
 
   // Playground / Ingestion API Tester State
   const [testModel, setTestModel] = useState<string>("gpt-4o");
@@ -267,6 +334,7 @@ export default function Dashboard() {
         fetchApiKeys();
         fetchMetrics();
         fetchLogs(user.id);
+        fetchPlanDetails();
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -413,7 +481,7 @@ export default function Dashboard() {
             </div>
 
             <button
-              onClick={() => { fetchMetrics(); fetchLogs(userId); fetchApiKeys(); }}
+              onClick={() => { fetchMetrics(); fetchLogs(userId); fetchApiKeys(); fetchPlanDetails(); }}
               disabled={isGlobalLoading}
               className="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-colors"
               title="Refresh All Data"
@@ -421,11 +489,26 @@ export default function Dashboard() {
               <RefreshCw className={`h-4 w-4 ${isGlobalLoading ? "animate-spin text-emerald-400" : ""}`} />
             </button>
 
-            {/* User email chip */}
+            {/* User email chip & Plan badge */}
             {userEmail && (
               <div className="hidden sm:flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-400">
                 <User className="h-3.5 w-3.5 text-zinc-500" />
                 <span className="font-mono max-w-[160px] truncate">{userEmail}</span>
+                <span
+                  className={`ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold font-mono border ${
+                    planDetails.plan === "pro"
+                      ? "bg-emerald-950/80 text-emerald-400 border-emerald-800/80 shadow-sm"
+                      : planDetails.plan === "enterprise"
+                      ? "bg-violet-950/80 text-violet-400 border-violet-800/80 shadow-sm"
+                      : "bg-zinc-800 text-zinc-400 border-zinc-700/60"
+                  }`}
+                >
+                  {planDetails.plan === "pro"
+                    ? "PRO TIER"
+                    : planDetails.plan === "enterprise"
+                    ? "ENTERPRISE"
+                    : "FREE SANDBOX"}
+                </span>
               </div>
             )}
 
@@ -474,6 +557,62 @@ export default function Dashboard() {
             <span className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400">
               {apiKeys.length} Active {apiKeys.length === 1 ? "Key" : "Keys"}
             </span>
+          </div>
+        </div>
+
+        {/* ── Tier Usage Progress Card ──────────────────────── */}
+        <div className="bento-card p-5 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-zinc-900 border border-zinc-800 text-emerald-400 shrink-0">
+                <TrendingUp className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-xs font-semibold text-zinc-100">
+                    Monthly Log Metering ({planDetails.tierName})
+                  </h4>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-semibold font-mono border ${
+                      planDetails.plan === "pro"
+                        ? "bg-emerald-950/80 text-emerald-400 border-emerald-800/80"
+                        : planDetails.plan === "enterprise"
+                        ? "bg-violet-950/80 text-violet-400 border-violet-800/80"
+                        : "bg-zinc-900 text-zinc-400 border-zinc-800"
+                    }`}
+                  >
+                    {planDetails.limitLabel}
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 mt-0.5">
+                  <span className="font-semibold text-zinc-200">{planDetails.usage.toLocaleString()}</span> of{" "}
+                  <span className="font-semibold text-zinc-200">{planDetails.limit.toLocaleString()}</span> logs used this month ({planDetails.percentage}%)
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={handleTogglePlan}
+              disabled={isSwitchingPlan}
+              className="self-start sm:self-auto text-xs px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-emerald-400 hover:text-emerald-300 font-semibold transition-all flex items-center gap-2 shrink-0"
+            >
+              {isSwitchingPlan && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              {planDetails.plan === "pro" ? "Switch to Free Sandbox" : "Upgrade to Pro Tier ($49/mo)"}
+            </button>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="w-full bg-zinc-900 rounded-full h-2 overflow-hidden border border-zinc-800/80">
+            <div
+              className={`h-full transition-all duration-500 rounded-full ${
+                planDetails.percentage >= 90
+                  ? "bg-rose-500"
+                  : planDetails.percentage >= 70
+                  ? "bg-amber-400"
+                  : "bg-emerald-400"
+              }`}
+              style={{ width: `${Math.max(2, planDetails.percentage)}%` }}
+            />
           </div>
         </div>
 

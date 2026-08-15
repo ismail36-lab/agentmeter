@@ -50,6 +50,10 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
+      const urlPlan = typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("plan") || "free"
+        : "free";
+
       if (mode === "login") {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
@@ -59,13 +63,31 @@ export default function LoginPage() {
         }
         if (data.session) {
           syncSessionCookie(data.session);
+          if (urlPlan && urlPlan !== "free") {
+            try {
+              await fetch("/api/plan", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${data.session.access_token}`,
+                },
+                body: JSON.stringify({ plan: urlPlan }),
+              });
+            } catch {}
+          }
         }
         if (!hasRedirectedRef.current) {
           hasRedirectedRef.current = true;
           window.location.href = getNextDestination();
         }
       } else {
-        const { error } = await supabase.auth.signUp({ email, password });
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: { plan: urlPlan },
+          },
+        });
         if (error) {
           setError(error.message);
           setIsLoading(false);
