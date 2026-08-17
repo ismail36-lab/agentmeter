@@ -640,20 +640,20 @@ export default function Dashboard() {
             </div>
 
             {/* Actions */}
-            <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto shrink-0">
+            <div className="flex items-center gap-3 self-start sm:self-auto shrink-0">
               {planDetails.plan === "pro" ? (
                 <>
                   <button
                     id="manage-subscription-btn"
                     onClick={handleManageBilling}
                     disabled={isLoadingPortal}
-                    className="text-xs px-4 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 hover:text-emerald-300 font-semibold transition-all flex items-center gap-2"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-emerald-950/30 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-900/40 transition-all"
                     title="Open Stripe Customer Portal"
                   >
                     {isLoadingPortal ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
                     ) : (
-                      <CreditCard className="h-3.5 w-3.5" />
+                      <CreditCard className="h-4 w-4 flex-shrink-0" />
                     )}
                     Manage Subscription
                   </button>
@@ -661,9 +661,9 @@ export default function Dashboard() {
                   <button
                     onClick={handleTogglePlan}
                     disabled={isSwitchingPlan}
-                    className="text-xs px-3.5 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-300 font-medium transition-all flex items-center gap-2"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-300 border border-zinc-700/60 transition-all"
                   >
-                    {isSwitchingPlan && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {isSwitchingPlan && <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />}
                     Switch to Free Sandbox
                   </button>
                 </>
@@ -672,12 +672,12 @@ export default function Dashboard() {
                   <button
                     onClick={handleTogglePlan}
                     disabled={isSwitchingPlan}
-                    className="text-xs px-4.5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold transition-all flex items-center gap-2 shadow-md shadow-emerald-950/40"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-emerald-950/30 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-900/40 transition-all"
                   >
                     {isSwitchingPlan ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
                     ) : (
-                      <Zap className="h-3.5 w-3.5" />
+                      <Zap className="h-4 w-4 flex-shrink-0" />
                     )}
                     Upgrade to Pro ($49/mo)
                   </button>
