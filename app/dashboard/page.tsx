@@ -599,69 +599,95 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* ── Tier Usage Progress Card ──────────────────────── */}
-        <div className="bento-card p-5 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        {/* ── Unified Subscription & Usage Card ──────────────── */}
+        <div className="bento-card p-6 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="p-2 rounded-xl bg-zinc-900 border border-zinc-800 text-emerald-400 shrink-0">
+              <div className="p-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-emerald-400 shrink-0">
                 <TrendingUp className="h-5 w-5" />
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h4 className="text-xs font-semibold text-zinc-100">
-                    Monthly Log Metering ({planDetails.tierName})
-                  </h4>
+                  <h3 className="text-sm font-semibold text-zinc-100">
+                    Subscription &amp; Usage
+                  </h3>
                   <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-semibold font-mono border ${
+                    className={`px-2.5 py-0.5 rounded text-[10px] font-bold font-mono border ${
                       planDetails.plan === "pro"
-                        ? "bg-emerald-950/80 text-emerald-400 border-emerald-800/80"
+                        ? "bg-emerald-950/80 text-emerald-400 border-emerald-800/60"
                         : planDetails.plan === "enterprise"
-                        ? "bg-violet-950/80 text-violet-400 border-violet-800/80"
-                        : "bg-zinc-900 text-zinc-400 border-zinc-800"
+                        ? "bg-violet-950/80 text-violet-400 border-violet-800/60"
+                        : "bg-zinc-800 text-zinc-400 border-zinc-700/60"
                     }`}
                   >
-                    {planDetails.limitLabel}
+                    {planDetails.plan === "pro"
+                      ? "PRO TIER"
+                      : planDetails.plan === "enterprise"
+                      ? "ENTERPRISE"
+                      : "FREE SANDBOX"}
                   </span>
                 </div>
-                <p className="text-xs text-zinc-400 mt-0.5">
-                  <span className="font-semibold text-zinc-200">{planDetails.usage.toLocaleString()}</span> of{" "}
-                  <span className="font-semibold text-zinc-200">{planDetails.limit.toLocaleString()}</span> logs used this month ({planDetails.percentage}%)
+                <p className="text-xs text-zinc-400 mt-1">
+                  <span className="font-semibold text-zinc-100">
+                    {planDetails.usage.toLocaleString()} / {planDetails.limit.toLocaleString()} logs used
+                  </span>{" "}
+                  this month ({planDetails.percentage}%) ·{" "}
+                  <span className="text-zinc-500 font-mono">
+                    {planDetails.remaining.toLocaleString()} remaining
+                  </span>
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 self-start sm:self-auto">
-              {/* Manage Billing — only visible to Pro subscribers with a Stripe customer */}
-              {planDetails.plan === "pro" && (
-                <button
-                  id="manage-billing-btn"
-                  onClick={handleManageBilling}
-                  disabled={isLoadingPortal}
-                  className="text-xs px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-50 font-semibold transition-all flex items-center gap-2 shrink-0"
-                  title="Open Stripe Customer Portal"
-                >
-                  {isLoadingPortal ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <CreditCard className="h-3.5 w-3.5 text-zinc-400" />
-                  )}
-                  Manage Billing
-                </button>
-              )}
+            {/* Actions */}
+            <div className="flex flex-wrap items-center gap-2.5 self-start sm:self-auto shrink-0">
+              {planDetails.plan === "pro" ? (
+                <>
+                  <button
+                    id="manage-subscription-btn"
+                    onClick={handleManageBilling}
+                    disabled={isLoadingPortal}
+                    className="text-xs px-4 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 hover:text-emerald-300 font-semibold transition-all flex items-center gap-2"
+                    title="Open Stripe Customer Portal"
+                  >
+                    {isLoadingPortal ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <CreditCard className="h-3.5 w-3.5" />
+                    )}
+                    Manage Subscription
+                  </button>
 
-              <button
-                onClick={handleTogglePlan}
-                disabled={isSwitchingPlan}
-                className="text-xs px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-emerald-400 hover:text-emerald-300 font-semibold transition-all flex items-center gap-2 shrink-0"
-              >
-                {isSwitchingPlan && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                {planDetails.plan === "pro" ? "Switch to Free Sandbox" : "Upgrade to Pro Tier ($49/mo)"}
-              </button>
+                  <button
+                    onClick={handleTogglePlan}
+                    disabled={isSwitchingPlan}
+                    className="text-xs px-3.5 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-300 font-medium transition-all flex items-center gap-2"
+                  >
+                    {isSwitchingPlan && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    Switch to Free Sandbox
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={handleTogglePlan}
+                    disabled={isSwitchingPlan}
+                    className="text-xs px-4.5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold transition-all flex items-center gap-2 shadow-md shadow-emerald-950/40"
+                  >
+                    {isSwitchingPlan ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Zap className="h-3.5 w-3.5" />
+                    )}
+                    Upgrade to Pro ($49/mo)
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
           {/* Progress Bar */}
-          <div className="w-full bg-zinc-900 rounded-full h-2 overflow-hidden border border-zinc-800/80">
+          <div className="w-full bg-zinc-900 rounded-full h-2.5 overflow-hidden border border-zinc-800/80">
             <div
               className={`h-full transition-all duration-500 rounded-full ${
                 planDetails.percentage >= 90
@@ -697,132 +723,6 @@ export default function Dashboard() {
               </a>
             </div>
           )}
-        </div>
-
-        {/* ── Subscription Overview Card ─────────────────────── */}
-        <div className="bento-card p-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-
-            {/* Left — Plan identity + usage stats */}
-            <div className="flex items-center gap-5">
-              {/* Circular usage indicator */}
-              <div className="relative h-20 w-20 shrink-0">
-                <svg className="h-20 w-20 -rotate-90" viewBox="0 0 80 80">
-                  {/* Track */}
-                  <circle
-                    cx="40" cy="40" r="34"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="7"
-                    className="text-zinc-800"
-                  />
-                  {/* Fill */}
-                  <circle
-                    cx="40" cy="40" r="34"
-                    fill="none"
-                    strokeWidth="7"
-                    strokeLinecap="round"
-                    strokeDasharray={`${2 * Math.PI * 34}`}
-                    strokeDashoffset={`${2 * Math.PI * 34 * (1 - Math.min(planDetails.percentage, 100) / 100)}`}
-                    className={`transition-all duration-700 ${
-                      planDetails.percentage >= 90
-                        ? "stroke-rose-500"
-                        : planDetails.percentage >= 70
-                        ? "stroke-amber-400"
-                        : "stroke-emerald-400"
-                    }`}
-                  />
-                </svg>
-                <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-zinc-100">
-                  {planDetails.percentage}%
-                </span>
-              </div>
-
-              {/* Stats block */}
-              <div className="space-y-1.5">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-sm font-semibold text-zinc-100">Subscription Overview</h3>
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono border ${
-                      planDetails.plan === "pro"
-                        ? "bg-emerald-950/80 text-emerald-400 border-emerald-800/60"
-                        : planDetails.plan === "enterprise"
-                        ? "bg-violet-950/80 text-violet-400 border-violet-800/60"
-                        : "bg-zinc-800 text-zinc-400 border-zinc-700/60"
-                    }`}
-                  >
-                    {planDetails.plan === "pro"
-                      ? "PRO"
-                      : planDetails.plan === "enterprise"
-                      ? "ENTERPRISE"
-                      : "FREE"}
-                  </span>
-                </div>
-
-                <p className="text-xs text-zinc-400">
-                  <span className="text-zinc-100 font-semibold">{planDetails.usage.toLocaleString()}</span>
-                  {" "}of{" "}
-                  <span className="text-zinc-100 font-semibold">{planDetails.limit.toLocaleString()}</span>
-                  {" "}logs used this month
-                </p>
-                <p className="text-xs text-zinc-500">
-                  {planDetails.remaining.toLocaleString()} logs remaining · {planDetails.tierName}
-                </p>
-
-                {/* Mini progress bar */}
-                <div className="w-48 bg-zinc-800 rounded-full h-1.5 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${
-                      planDetails.percentage >= 90
-                        ? "bg-rose-500"
-                        : planDetails.percentage >= 70
-                        ? "bg-amber-400"
-                        : "bg-emerald-400"
-                    }`}
-                    style={{ width: `${Math.max(2, planDetails.percentage)}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Right — Action button */}
-            <div className="flex flex-col gap-2 items-start sm:items-end shrink-0">
-              {planDetails.plan === "pro" ? (
-                <>
-                  <button
-                    id="manage-subscription-btn"
-                    onClick={handleManageBilling}
-                    disabled={isLoadingPortal}
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 hover:text-emerald-300 text-xs font-semibold transition-all"
-                  >
-                    {isLoadingPortal ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <CreditCard className="h-3.5 w-3.5" />
-                    )}
-                    Manage Subscription
-                  </button>
-                  <p className="text-[10px] text-zinc-600 font-mono">
-                    Invoices · Payment · Cancel
-                  </p>
-                </>
-              ) : (
-                <>
-                  <a
-                    href="/api/checkout?plan=pro"
-                    id="subscription-overview-upgrade-btn"
-                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-bold transition-colors"
-                  >
-                    <Zap className="h-3.5 w-3.5" />
-                    Upgrade to Pro — $49/mo
-                  </a>
-                  <p className="text-[10px] text-zinc-600 font-mono">
-                    250k logs/mo · Unlimited API keys
-                  </p>
-                </>
-              )}
-            </div>
-          </div>
         </div>
 
         {/* ── Metric Cards Row ───────────────────────────────── */}
