@@ -154,16 +154,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2b. Quota Limit Enforcement: Fetch organization plan & count monthly logs
+    // 2b. Quota Limit Enforcement: Check public.profiles first (Stripe-driven plan),
+    //     then fall back to user_metadata plan, then default to 'free'.
     let userPlan = "free";
     if (userId) {
       try {
-        const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
-        if (userData?.user?.user_metadata?.plan) {
-          userPlan = String(userData.user.user_metadata.plan).toLowerCase();
+        // Primary: read plan from public.profiles (updated by Stripe webhook)
+        const { data: profile } = await supabaseAdmin
+          .from("profiles")
+          .select("plan")
+          .eq("id", userId)
+          .maybeSingle();
+
+        if (profile?.plan) {
+          userPlan = String(profile.plan).toLowerCase();
+        } else {
+          // Fallback: read plan from Supabase Auth user_metadata
+          const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
+          if (userData?.user?.user_metadata?.plan) {
+            userPlan = String(userData.user.user_metadata.plan).toLowerCase();
+          }
         }
       } catch (err) {
-        console.warn("Could not fetch user metadata for quota check:", err);
+        console.warn("Could not fetch plan for quota check:", err);
       }
     }
 
@@ -181,7 +194,7 @@ export async function POST(req: NextRequest) {
       const { count } = await supabaseAdmin
         .from("usage_logs")
         .select("id", { count: "exact", head: true })
-        .or(userId ? `user_id.eq.${userId},user_id.is.null` : "user_id.is.null")
+        .eq("user_id", userId ?? "")
         .gte("created_at", firstDayOfMonth);
 
       monthlyCount = count ?? 0;
@@ -189,9 +202,10 @@ export async function POST(req: NextRequest) {
       console.warn("Quota usage count notice:", err);
     }
 
-    if (monthlyCount >= monthlyLimit) {
+    // Enforce limit for free-tier users only
+    if (userPlan === "free" && monthlyCount >= monthlyLimit) {
       return NextResponse.json(
-        { error: "Monthly log quota exceeded. Upgrade to Pro for higher limits." },
+        { error: "Monthly usage limit reached. Please upgrade to Pro." },
         { status: 429, headers: getCorsHeaders() }
       );
     }

@@ -30,6 +30,7 @@ import {
   EyeOff,
   TrendingUp,
   BookOpen,
+  CreditCard,
 } from "lucide-react";
 import { UsageTrendChart } from "@/components/charts/UsageTrendChart";
 import { ModelDistributionChart } from "@/components/charts/ModelDistributionChart";
@@ -161,6 +162,7 @@ export default function Dashboard() {
     remaining: 1000,
   });
   const [isSwitchingPlan, setIsSwitchingPlan] = useState(false);
+  const [isLoadingPortal, setIsLoadingPortal] = useState(false);
 
   // Fetch Current Plan & Tier Usage
   const fetchPlanDetails = async () => {
@@ -205,6 +207,30 @@ export default function Dashboard() {
       console.warn("Could not update plan:", err);
     } finally {
       setIsSwitchingPlan(false);
+    }
+  };
+
+  // Open Stripe Customer Portal for billing management
+  const handleManageBilling = async () => {
+    setIsLoadingPortal(true);
+    try {
+      const sessionRes = await supabase.auth.getSession();
+      const token = sessionRes.data.session?.access_token;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch("/api/stripe/portal", { method: "POST", headers });
+      const data = await res.json();
+
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+      } else {
+        console.warn("Billing portal error:", data.error);
+      }
+    } catch (err) {
+      console.warn("Could not open billing portal:", err);
+    } finally {
+      setIsLoadingPortal(false);
     }
   };
 
@@ -604,14 +630,34 @@ export default function Dashboard() {
               </div>
             </div>
 
-            <button
-              onClick={handleTogglePlan}
-              disabled={isSwitchingPlan}
-              className="self-start sm:self-auto text-xs px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-emerald-400 hover:text-emerald-300 font-semibold transition-all flex items-center gap-2 shrink-0"
-            >
-              {isSwitchingPlan && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              {planDetails.plan === "pro" ? "Switch to Free Sandbox" : "Upgrade to Pro Tier ($49/mo)"}
-            </button>
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              {/* Manage Billing — only visible to Pro subscribers with a Stripe customer */}
+              {planDetails.plan === "pro" && (
+                <button
+                  id="manage-billing-btn"
+                  onClick={handleManageBilling}
+                  disabled={isLoadingPortal}
+                  className="text-xs px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 hover:text-zinc-50 font-semibold transition-all flex items-center gap-2 shrink-0"
+                  title="Open Stripe Customer Portal"
+                >
+                  {isLoadingPortal ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <CreditCard className="h-3.5 w-3.5 text-zinc-400" />
+                  )}
+                  Manage Billing
+                </button>
+              )}
+
+              <button
+                onClick={handleTogglePlan}
+                disabled={isSwitchingPlan}
+                className="text-xs px-3.5 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-emerald-400 hover:text-emerald-300 font-semibold transition-all flex items-center gap-2 shrink-0"
+              >
+                {isSwitchingPlan && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {planDetails.plan === "pro" ? "Switch to Free Sandbox" : "Upgrade to Pro Tier ($49/mo)"}
+              </button>
+            </div>
           </div>
 
           {/* Progress Bar */}
@@ -627,6 +673,30 @@ export default function Dashboard() {
               style={{ width: `${Math.max(2, planDetails.percentage)}%` }}
             />
           </div>
+
+          {/* Limit-reached banner — only visible to free users at 100% */}
+          {planDetails.plan === "free" && planDetails.percentage >= 100 && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-1 px-4 py-3 rounded-xl bg-rose-950/50 border border-rose-800/60">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-4 w-4 text-rose-400 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-xs font-semibold text-rose-300">Monthly limit reached</p>
+                  <p className="text-xs text-rose-400/80 mt-0.5">
+                    You've used all {planDetails.limit.toLocaleString()} free logs for this month.
+                    New telemetry submissions will be blocked until you upgrade or the month resets.
+                  </p>
+                </div>
+              </div>
+              <a
+                href="/api/checkout?plan=pro"
+                id="upgrade-to-pro-banner-btn"
+                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-bold transition-colors"
+              >
+                <Zap className="h-3.5 w-3.5" />
+                Upgrade to Pro
+              </a>
+            </div>
+          )}
         </div>
 
         {/* ── Metric Cards Row ───────────────────────────────── */}
