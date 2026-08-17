@@ -65,6 +65,8 @@ async function handleCheckout(req: NextRequest) {
           mode: "subscription",
           success_url: `${domain}/dashboard?checkout=success&plan=${requestedPlan}`,
           cancel_url: `${domain}/#pricing`,
+          // Pass the authenticated user's ID so the webhook can match the session to a Supabase profile
+          ...(user?.id ? { client_reference_id: user.id } : {}),
           ...(user?.email ? { customer_email: user.email } : {}),
         }).toString(),
       });
