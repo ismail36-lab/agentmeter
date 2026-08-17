@@ -126,10 +126,18 @@ export default function Home() {
       return;
     }
 
-    // 2. "Start Pro Trial" ($49/mo Plan) -> Calls API route /api/checkout?plan=pro
+    // 2. "Start Pro Trial" ($49/mo Plan) — check auth first, then call checkout
     if (planKey === "pro") {
       setLoadingPlan("pro");
       try {
+        // Check if user is authenticated before triggering Stripe Checkout
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData.session?.user) {
+          // Unauthenticated — redirect to login with return context
+          router.push("/login?plan=pro&checkout=pending");
+          return;
+        }
+
         const res = await fetch("/api/checkout?plan=pro");
         if (res.ok) {
           const data = await res.json();

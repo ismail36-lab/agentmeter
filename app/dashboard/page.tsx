@@ -699,6 +699,132 @@ export default function Dashboard() {
           )}
         </div>
 
+        {/* ── Subscription Overview Card ─────────────────────── */}
+        <div className="bento-card p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+
+            {/* Left — Plan identity + usage stats */}
+            <div className="flex items-center gap-5">
+              {/* Circular usage indicator */}
+              <div className="relative h-20 w-20 shrink-0">
+                <svg className="h-20 w-20 -rotate-90" viewBox="0 0 80 80">
+                  {/* Track */}
+                  <circle
+                    cx="40" cy="40" r="34"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="7"
+                    className="text-zinc-800"
+                  />
+                  {/* Fill */}
+                  <circle
+                    cx="40" cy="40" r="34"
+                    fill="none"
+                    strokeWidth="7"
+                    strokeLinecap="round"
+                    strokeDasharray={`${2 * Math.PI * 34}`}
+                    strokeDashoffset={`${2 * Math.PI * 34 * (1 - Math.min(planDetails.percentage, 100) / 100)}`}
+                    className={`transition-all duration-700 ${
+                      planDetails.percentage >= 90
+                        ? "stroke-rose-500"
+                        : planDetails.percentage >= 70
+                        ? "stroke-amber-400"
+                        : "stroke-emerald-400"
+                    }`}
+                  />
+                </svg>
+                <span className="absolute inset-0 flex items-center justify-center text-sm font-bold text-zinc-100">
+                  {planDetails.percentage}%
+                </span>
+              </div>
+
+              {/* Stats block */}
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-zinc-100">Subscription Overview</h3>
+                  <span
+                    className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono border ${
+                      planDetails.plan === "pro"
+                        ? "bg-emerald-950/80 text-emerald-400 border-emerald-800/60"
+                        : planDetails.plan === "enterprise"
+                        ? "bg-violet-950/80 text-violet-400 border-violet-800/60"
+                        : "bg-zinc-800 text-zinc-400 border-zinc-700/60"
+                    }`}
+                  >
+                    {planDetails.plan === "pro"
+                      ? "PRO"
+                      : planDetails.plan === "enterprise"
+                      ? "ENTERPRISE"
+                      : "FREE"}
+                  </span>
+                </div>
+
+                <p className="text-xs text-zinc-400">
+                  <span className="text-zinc-100 font-semibold">{planDetails.usage.toLocaleString()}</span>
+                  {" "}of{" "}
+                  <span className="text-zinc-100 font-semibold">{planDetails.limit.toLocaleString()}</span>
+                  {" "}logs used this month
+                </p>
+                <p className="text-xs text-zinc-500">
+                  {planDetails.remaining.toLocaleString()} logs remaining · {planDetails.tierName}
+                </p>
+
+                {/* Mini progress bar */}
+                <div className="w-48 bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${
+                      planDetails.percentage >= 90
+                        ? "bg-rose-500"
+                        : planDetails.percentage >= 70
+                        ? "bg-amber-400"
+                        : "bg-emerald-400"
+                    }`}
+                    style={{ width: `${Math.max(2, planDetails.percentage)}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Right — Action button */}
+            <div className="flex flex-col gap-2 items-start sm:items-end shrink-0">
+              {planDetails.plan === "pro" ? (
+                <>
+                  <button
+                    id="manage-subscription-btn"
+                    onClick={handleManageBilling}
+                    disabled={isLoadingPortal}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 hover:text-emerald-300 text-xs font-semibold transition-all"
+                  >
+                    {isLoadingPortal ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <CreditCard className="h-3.5 w-3.5" />
+                    )}
+                    Manage Subscription
+                  </button>
+                  <p className="text-[10px] text-zinc-600 font-mono">
+                    Invoices · Payment · Cancel
+                  </p>
+                </>
+              ) : (
+                <>
+                  <a
+                    href="/api/checkout?plan=pro"
+                    id="subscription-overview-upgrade-btn"
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-bold transition-colors"
+                  >
+                    <Zap className="h-3.5 w-3.5" />
+                    Upgrade to Pro — $49/mo
+                  </a>
+                  <p className="text-[10px] text-zinc-600 font-mono">
+                    250k logs/mo · Unlimited API keys
+                  </p>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* ── Metric Cards Row ───────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 

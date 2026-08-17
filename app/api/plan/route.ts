@@ -27,9 +27,22 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Read plan from user_metadata (default to 'free')
-    const rawPlan = user.user_metadata?.plan || "free";
-    const planKey = String(rawPlan).toLowerCase() in TIER_LIMITS ? String(rawPlan).toLowerCase() : "free";
+    // Read plan: check public.profiles first (Stripe source of truth), fallback to user_metadata
+    let rawPlan = "free";
+
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("plan")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profile?.plan) {
+      rawPlan = String(profile.plan).toLowerCase();
+    } else {
+      rawPlan = user.user_metadata?.plan || "free";
+    }
+
+    const planKey = rawPlan in TIER_LIMITS ? rawPlan : "free";
     const tier = TIER_LIMITS[planKey];
 
     // Count monthly log usage for this user
