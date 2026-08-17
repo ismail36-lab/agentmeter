@@ -65,16 +65,18 @@ export async function POST(req: NextRequest) {
           break;
         }
 
-        // Update 'profiles' table in Supabase bypassing RLS with Admin Client
+        // Upsert 'profiles' table in Supabase bypassing RLS with Admin Client.
+        // Uses upsert() so if no profile row exists yet for this user, one is created automatically.
         const { error } = await supabaseAdmin
           .from("profiles")
-          .update({
+          .upsert({
+            id: userId,
             stripe_customer_id: customerId,
             stripe_subscription_id: subscriptionId,
             plan: "pro",
             subscription_status: "active",
-          })
-          .eq("id", userId);
+            updated_at: new Date().toISOString(),
+          });
 
         if (error) {
           console.error("Error updating profile for checkout.session.completed:", error);
