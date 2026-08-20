@@ -107,11 +107,11 @@ runAgent();`;
 }`;
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-50 flex flex-col font-sans selection:bg-emerald-500/20">
+    <div className="min-h-screen bg-[#09090b] text-zinc-50 flex flex-col font-sans selection:bg-emerald-500/20 w-full max-w-full overflow-x-hidden">
 
       {/* ── Navbar ─────────────────────────────────────────────── */}
       <header className="sticky top-0 z-50 border-b border-zinc-800/80 bg-[#09090b]/80 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 py-3 sm:py-0 sm:h-16 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="h-9 w-9 rounded-xl bg-zinc-900 border border-zinc-700/80 flex items-center justify-center">
               <Zap className="h-4.5 w-4.5 text-emerald-400" />
@@ -139,11 +139,11 @@ runAgent();`;
       </header>
 
       {/* ── Main Container ─────────────────────────────────────── */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-8 overflow-x-hidden">
         
         {/* Banner */}
         <div className="bento-card p-6 border border-zinc-800 bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950">
-          <div className="flex items-start justify-between">
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
             <div className="space-y-2">
               <h1 className="text-2xl font-bold text-zinc-50 tracking-tight flex items-center gap-2">
                 <BookOpen className="h-6 w-6 text-emerald-400" />
@@ -157,10 +157,10 @@ runAgent();`;
         </div>
 
         {/* Quick Links Navigation */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
           <a
             href="#python-sdk"
-            className="bento-card p-4 hover:border-emerald-500/50 transition-all group flex items-center gap-3"
+            className="bento-card p-4 hover:border-emerald-500/50 transition-all group flex items-center gap-3 w-full"
           >
             <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:scale-105 transition-transform">
               <FileCode className="h-5 w-5" />
@@ -173,7 +173,7 @@ runAgent();`;
 
           <a
             href="#nodejs-sdk"
-            className="bento-card p-4 hover:border-sky-500/50 transition-all group flex items-center gap-3"
+            className="bento-card p-4 hover:border-sky-500/50 transition-all group flex items-center gap-3 w-full"
           >
             <div className="p-2.5 rounded-xl bg-sky-500/10 text-sky-400 border border-sky-500/20 group-hover:scale-105 transition-transform">
               <Code2 className="h-5 w-5" />
@@ -186,7 +186,7 @@ runAgent();`;
 
           <a
             href="#rest-api"
-            className="bento-card p-4 hover:border-violet-500/50 transition-all group flex items-center gap-3"
+            className="bento-card p-4 hover:border-violet-500/50 transition-all group flex items-center gap-3 w-full"
           >
             <div className="p-2.5 rounded-xl bg-violet-500/10 text-violet-400 border border-violet-500/20 group-hover:scale-105 transition-transform">
               <Globe className="h-5 w-5" />
@@ -199,7 +199,7 @@ runAgent();`;
         </div>
 
         {/* ── Section 1: Python SDK ───────────────────────────── */}
-        <section id="python-sdk" className="bento-card p-6 space-y-4">
+        <section id="python-sdk" className="bento-card p-6 space-y-4 w-full">
           <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
             <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
               <FileCode className="h-4.5 w-4.5 text-emerald-400" />
@@ -214,11 +214,11 @@ runAgent();`;
             <p className="text-xs text-zinc-400">
               Install the official AgentMeter Python package from PyPI:
             </p>
-            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 font-mono text-xs text-emerald-400 flex items-center justify-between">
+            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 font-mono text-xs text-emerald-400 flex items-center justify-between w-full max-w-full overflow-x-auto">
               <span>{pythonInstallCode}</span>
               <button
                 onClick={() => copyToClipboard(pythonInstallCode, "py_install")}
-                className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
+                className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
                 title="Copy package command"
               >
                 {copiedId === "py_install" ? (
@@ -234,10 +234,10 @@ runAgent();`;
             <p className="text-xs text-zinc-400">
               Initialize the client and send telemetry logs after calling OpenAI, Anthropic, or custom LLM endpoints:
             </p>
-            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-4 font-mono text-xs text-zinc-300 overflow-x-auto">
+            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-4 font-mono text-xs text-zinc-300 w-full max-w-full overflow-x-auto">
               <button
                 onClick={() => copyToClipboard(pythonSnippet, "py_snippet")}
-                className="absolute right-3 top-3 p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
+                className="absolute right-3 top-3 p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
                 title="Copy code snippet"
               >
                 {copiedId === "py_snippet" ? (
@@ -252,7 +252,7 @@ runAgent();`;
         </section>
 
         {/* ── Section 2: Node.js / TypeScript ───────────────── */}
-        <section id="nodejs-sdk" className="bento-card p-6 space-y-4">
+        <section id="nodejs-sdk" className="bento-card p-6 space-y-4 w-full">
           <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
             <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
               <Code2 className="h-4.5 w-4.5 text-sky-400" />
@@ -267,11 +267,11 @@ runAgent();`;
             <p className="text-xs text-zinc-400">
               Install the Node.js SDK via npm or yarn:
             </p>
-            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 font-mono text-xs text-sky-400 flex items-center justify-between">
+            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-3.5 font-mono text-xs text-sky-400 flex items-center justify-between w-full max-w-full overflow-x-auto">
               <span>{nodeInstallCode}</span>
               <button
                 onClick={() => copyToClipboard(nodeInstallCode, "node_install")}
-                className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
+                className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
                 title="Copy package command"
               >
                 {copiedId === "node_install" ? (
@@ -287,10 +287,10 @@ runAgent();`;
             <p className="text-xs text-zinc-400">
               Import and initialize the client in your backend application or Next.js API routes:
             </p>
-            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-4 font-mono text-xs text-zinc-300 overflow-x-auto">
+            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-4 font-mono text-xs text-zinc-300 w-full max-w-full overflow-x-auto">
               <button
                 onClick={() => copyToClipboard(nodeSnippet, "node_snippet")}
-                className="absolute right-3 top-3 p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
+                className="absolute right-3 top-3 p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
                 title="Copy code snippet"
               >
                 {copiedId === "node_snippet" ? (
@@ -305,7 +305,7 @@ runAgent();`;
         </section>
 
         {/* ── Section 3: REST API Reference ──────────────────── */}
-        <section id="rest-api" className="bento-card p-6 space-y-5">
+        <section id="rest-api" className="bento-card p-6 space-y-5 w-full">
           <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
             <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
               <Globe className="h-4.5 w-4.5 text-violet-400" />
@@ -319,7 +319,7 @@ runAgent();`;
           {/* Headers */}
           <div className="space-y-2">
             <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Required HTTP Headers</h3>
-            <div className="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-950 p-4 font-mono text-xs">
+            <div className="w-full max-w-full overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-950 p-4 font-mono text-xs">
               <div className="space-y-1.5 text-zinc-300">
                 <div className="flex items-center gap-2">
                   <span className="text-violet-400 font-semibold">Authorization:</span>
@@ -336,7 +336,7 @@ runAgent();`;
           {/* Payload Parameters Table */}
           <div className="space-y-2">
             <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">JSON Request Payload Fields</h3>
-            <div className="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-950">
+            <div className="w-full max-w-full overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-950">
               <table className="w-full text-left text-xs font-mono">
                 <thead className="bg-zinc-900 text-zinc-400 uppercase text-[10px] border-b border-zinc-800">
                   <tr>
@@ -385,10 +385,10 @@ runAgent();`;
           {/* Curl Sample */}
           <div className="space-y-2">
             <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Example cURL Command</h3>
-            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-4 font-mono text-xs text-zinc-300 overflow-x-auto">
+            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-4 font-mono text-xs text-zinc-300 w-full max-w-full overflow-x-auto">
               <button
                 onClick={() => copyToClipboard(curlSnippet, "curl_snippet")}
-                className="absolute right-3 top-3 p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
+                className="absolute right-3 top-3 p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
                 title="Copy cURL snippet"
               >
                 {copiedId === "curl_snippet" ? (
@@ -404,10 +404,10 @@ runAgent();`;
           {/* Success Response Sample */}
           <div className="space-y-2">
             <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Successful Response (200 OK)</h3>
-            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-4 font-mono text-xs text-emerald-400 overflow-x-auto">
+            <div className="relative bg-zinc-950 border border-zinc-800 rounded-xl p-4 font-mono text-xs text-emerald-400 w-full max-w-full overflow-x-auto">
               <button
                 onClick={() => copyToClipboard(jsonResponseSnippet, "json_res")}
-                className="absolute right-3 top-3 p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors"
+                className="absolute right-3 top-3 p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
                 title="Copy JSON response"
               >
                 {copiedId === "json_res" ? (
@@ -421,16 +421,16 @@ runAgent();`;
           </div>
 
           {/* Status Codes Notice */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
-            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2 w-full">
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs w-full">
               <div className="font-bold font-mono text-emerald-400">200 Success</div>
               <p className="text-[11px] text-zinc-400 mt-1">Payload validated, cost calculated, and log stored in Supabase.</p>
             </div>
-            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs">
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs w-full">
               <div className="font-bold font-mono text-amber-400">401 Unauthorized</div>
               <p className="text-[11px] text-zinc-400 mt-1">Invalid or revoked secret key provided in Authorization header.</p>
             </div>
-            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs">
+            <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs w-full">
               <div className="font-bold font-mono text-rose-400">429 Quota Exceeded</div>
               <p className="text-[11px] text-zinc-400 mt-1">Monthly log quota limit reached for organization plan tier.</p>
             </div>

@@ -172,10 +172,10 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-50 antialiased">
+    <div className="min-h-screen bg-zinc-950 text-zinc-50 antialiased w-full max-w-full overflow-x-hidden">
       {/* ── Nav ─────────────────────────────────────────────── */}
       <nav className="fixed top-0 inset-x-0 z-50 border-b border-zinc-900 bg-zinc-950/80 backdrop-blur-xl">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+        <div className="max-w-6xl w-full mx-auto px-4 sm:px-6 py-3 sm:py-0 sm:h-14 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
           <span className="font-bold text-sm tracking-tight text-zinc-50 font-mono">
             AgentMeter<span className="text-emerald-400">.</span>
           </span>
@@ -194,7 +194,7 @@ export default function Home() {
       </nav>
 
       {/* ── Hero ─────────────────────────────────────────────── */}
-      <section className="pt-28 pb-20 px-4 sm:px-6 text-center max-w-4xl mx-auto">
+      <section className="pt-28 pb-16 px-4 sm:px-6 py-6 text-center max-w-4xl mx-auto w-full">
         <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-950/60 border border-emerald-900/60 text-emerald-400 text-xs font-mono mb-6">
           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
           Now supporting OpenAI, Anthropic &amp; Gemini
@@ -226,8 +226,8 @@ export default function Home() {
       </section>
 
       {/* ── Pricing Cards ────────────────────────────────────── */}
-      <section id="pricing" className="py-20 px-4 sm:px-6">
-        <div className="max-w-6xl mx-auto">
+      <section id="pricing" className="py-12 sm:py-16 px-4 sm:px-6 py-6 w-full">
+        <div className="max-w-6xl mx-auto w-full">
           <div className="text-center mb-14">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">
               Simple, Transparent Pricing
@@ -237,11 +237,11 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch w-full">
             {PLANS.map((plan) => (
               <div
                 key={plan.name}
-                className={`relative rounded-2xl p-6 flex flex-col gap-6 border transition-all ${
+                className={`relative rounded-2xl p-6 flex flex-col gap-6 border transition-all w-full ${
                   plan.highlight
                     ? "bg-zinc-900 border-emerald-500/60 ring-1 ring-emerald-500/30 shadow-xl shadow-emerald-900/20"
                     : "bg-zinc-900/60 border-zinc-800 hover:border-zinc-700"
@@ -308,10 +308,10 @@ export default function Home() {
       </section>
 
       {/* ── Feature Comparison Grid ───────────────────────────── */}
-      <section className="py-16 px-4 sm:px-6">
-        <div className="max-w-6xl mx-auto">
+      <section className="py-12 sm:py-16 px-4 sm:px-6 py-6 w-full">
+        <div className="max-w-6xl mx-auto w-full">
           <h2 className="text-xl font-bold text-center mb-8 text-zinc-100">Full Feature Comparison</h2>
-          <div className="overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-900/60">
+          <div className="w-full max-w-full overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-900/60">
             <table className="w-full text-sm text-left">
               <thead className="border-b border-zinc-800">
                 <tr>

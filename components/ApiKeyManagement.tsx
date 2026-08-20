@@ -79,9 +79,9 @@ export function ApiKeyManagement({
   );
 
   return (
-    <div className="bento-card p-6 space-y-5">
+    <div className="bento-card p-6 space-y-5 w-full">
       {/* Header & Main Action */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
         <div>
           <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2">
             <Key className="h-4 w-4 text-emerald-400" />
@@ -115,7 +115,7 @@ export function ApiKeyManagement({
 
       {/* Filter / Search Bar */}
       {apiKeys.length > 0 && (
-        <div className="relative">
+        <div className="relative w-full">
           <Search className="absolute left-3.5 top-2.5 h-4 w-4 text-zinc-500" />
           <input
             type="text"
@@ -128,7 +128,7 @@ export function ApiKeyManagement({
       )}
 
       {/* Table Container */}
-      <div className="overflow-x-auto rounded-xl border border-zinc-800/80 bg-zinc-950/60">
+      <div className="w-full max-w-full overflow-x-auto rounded-xl border border-zinc-800/80 bg-zinc-950/60">
         <table className="w-full text-left text-xs font-mono">
           <thead className="bg-zinc-900/60 text-zinc-400 uppercase tracking-wider text-[10px] border-b border-zinc-800">
             <tr>
@@ -168,7 +168,7 @@ export function ApiKeyManagement({
                     <td className="py-3.5 px-4 font-semibold text-zinc-200">{item.name}</td>
                     <td className="py-3.5 px-4 text-zinc-400">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-zinc-300">{displayKey}</span>
+                        <span className="font-mono text-zinc-300 truncate break-all max-w-[180px] sm:max-w-xs block">{displayKey}</span>
                         <button
                           type="button"
                           onClick={() => toggleVisibility(item.id)}

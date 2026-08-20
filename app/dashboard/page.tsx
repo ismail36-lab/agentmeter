@@ -481,11 +481,11 @@ export default function Dashboard() {
   const isGlobalLoading = isLoadingLogs || isLoadingMetrics;
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-50 flex flex-col font-sans selection:bg-emerald-500/20">
+    <div className="min-h-screen bg-[#09090b] text-zinc-50 flex flex-col font-sans selection:bg-emerald-500/20 w-full max-w-full overflow-x-hidden">
 
       {/* ── Navbar ─────────────────────────────────────────────── */}
       <header className="sticky top-0 z-50 border-b border-zinc-800/80 bg-[#09090b]/80 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 py-3 sm:py-0 sm:h-16 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
 
           {/* Logo */}
           <div className="flex items-center space-x-3">
@@ -503,7 +503,7 @@ export default function Dashboard() {
           </div>
 
           {/* Right controls */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-400">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="font-mono">Ingestion API Active</span>
@@ -532,7 +532,7 @@ export default function Dashboard() {
             {userEmail && (
               <div className="hidden sm:flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-400">
                 <User className="h-3.5 w-3.5 text-zinc-500" />
-                <span className="font-mono max-w-[160px] truncate">{userEmail}</span>
+                <span className="font-mono max-w-[140px] sm:max-w-[200px] truncate break-all">{userEmail}</span>
                 <span
                   className={`ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold font-mono border ${
                     planDetails.plan === "pro"
@@ -566,10 +566,10 @@ export default function Dashboard() {
       </header>
 
       {/* ── Main ───────────────────────────────────────────────── */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6 overflow-x-hidden">
 
         {/* ── Header Banner ──────────────────────────────────── */}
-        <div className="bento-card p-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="bento-card p-6 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
           <div>
             <h1 className="text-xl font-semibold text-zinc-50 flex items-center gap-2">
               LLM Telemetry &amp; Cost Analytics
@@ -601,7 +601,7 @@ export default function Dashboard() {
 
         {/* ── Unified Subscription & Usage Card ──────────────── */}
         <div className="bento-card p-6 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-emerald-400 shrink-0">
                 <TrendingUp className="h-5 w-5" />
@@ -702,7 +702,7 @@ export default function Dashboard() {
 
           {/* Limit-reached banner — only visible to free users at 100% */}
           {planDetails.plan === "free" && planDetails.percentage >= 100 && (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-1 px-4 py-3 rounded-xl bg-rose-950/50 border border-rose-800/60">
+            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between mt-1 px-4 py-3 rounded-xl bg-rose-950/50 border border-rose-800/60 font-sans">
               <div className="flex items-start gap-3">
                 <AlertCircle className="h-4 w-4 text-rose-400 mt-0.5 shrink-0" />
                 <div>
@@ -726,10 +726,10 @@ export default function Dashboard() {
         </div>
 
         {/* ── Metric Cards Row ───────────────────────────────── */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
 
           {/* Total Spend */}
-          <div className="bento-card bento-card-hover p-5">
+          <div className="bento-card bento-card-hover p-5 w-full">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Total Spend</span>
               <div className="p-2 rounded-lg bg-zinc-800/80 text-emerald-400 border border-zinc-700/60">
@@ -748,7 +748,7 @@ export default function Dashboard() {
           </div>
 
           {/* Total Tokens */}
-          <div className="bento-card bento-card-hover p-5">
+          <div className="bento-card bento-card-hover p-5 w-full">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Total Tokens</span>
               <div className="p-2 rounded-lg bg-zinc-800/80 text-sky-400 border border-zinc-700/60">
@@ -765,7 +765,7 @@ export default function Dashboard() {
           </div>
 
           {/* API Ingestions */}
-          <div className="bento-card bento-card-hover p-5">
+          <div className="bento-card bento-card-hover p-5 w-full">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">API Ingestions</span>
               <div className="p-2 rounded-lg bg-zinc-800/80 text-violet-400 border border-zinc-700/60">
@@ -782,7 +782,7 @@ export default function Dashboard() {
           </div>
 
           {/* Top Model */}
-          <div className="bento-card bento-card-hover p-5">
+          <div className="bento-card bento-card-hover p-5 w-full">
             <div className="flex items-center justify-between">
               <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Top Model</span>
               <div className="p-2 rounded-lg bg-zinc-800/80 text-amber-400 border border-zinc-700/60">
@@ -790,7 +790,7 @@ export default function Dashboard() {
               </div>
             </div>
             <div className="mt-4">
-              <span className="text-xl font-bold font-mono text-zinc-50 truncate block">
+              <span className="text-xl font-bold font-mono text-zinc-50 truncate break-all block">
                 {metrics.topModel}
               </span>
             </div>
@@ -799,11 +799,11 @@ export default function Dashboard() {
         </div>
 
         {/* ── Visual Charts Row ─────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
+          <div className="sm:col-span-2 lg:col-span-3 w-full">
             <UsageTrendChart data={dailyTrend} />
           </div>
-          <div className="lg:col-span-1">
+          <div className="sm:col-span-2 lg:col-span-1 w-full">
             <ModelDistributionChart data={modelBreakdown} totalSpend={metrics.totalSpend} />
           </div>
         </div>
@@ -827,10 +827,10 @@ export default function Dashboard() {
         />
 
         {/* ── Playground + Table ─────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
 
           {/* API Tester */}
-          <div className="bento-card p-6 space-y-4">
+          <div className="bento-card p-6 space-y-4 sm:col-span-2 lg:col-span-1 w-full">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2">
                 <Terminal className="h-4 w-4 text-emerald-400" />
@@ -878,7 +878,7 @@ export default function Dashboard() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full">
                 <div>
                   <label className="block text-zinc-500 mb-1">Prompt Tokens</label>
                   <input
@@ -920,23 +920,25 @@ export default function Dashboard() {
 
             {/* Test Result */}
             {testResult && (
-              <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-[11px] font-mono space-y-1">
+              <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-[11px] font-mono space-y-1 w-full">
                 <div className="flex items-center justify-between text-zinc-500">
                   <span>API Response:</span>
                   <span className={testResult.success ? "text-emerald-400" : "text-red-400"}>
                     {testResult.success ? "200 OK" : "Error"}
                   </span>
                 </div>
-                <pre className="text-zinc-300 overflow-x-auto p-1 max-h-32">
-                  {JSON.stringify(testResult, null, 2)}
-                </pre>
+                <div className="w-full max-w-full overflow-x-auto">
+                  <pre className="text-zinc-300 p-1 max-h-32">
+                    {JSON.stringify(testResult, null, 2)}
+                  </pre>
+                </div>
               </div>
             )}
           </div>
 
           {/* Telemetry Table */}
-          <div className="lg:col-span-2 bento-card p-6 space-y-4 flex flex-col">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="sm:col-span-2 lg:col-span-3 bento-card p-6 space-y-4 flex flex-col w-full">
+            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2">
                   <Clock className="h-4 w-4 text-violet-400" />
@@ -961,7 +963,7 @@ export default function Dashboard() {
             </div>
 
             {/* Table */}
-            <div className="overflow-x-auto rounded-xl border border-zinc-800/80 bg-zinc-950/60">
+            <div className="w-full max-w-full overflow-x-auto rounded-xl border border-zinc-800/80 bg-zinc-950/60">
               <table className="w-full text-left text-xs font-mono">
                 <thead className="bg-zinc-900/60 text-zinc-500 uppercase tracking-wider text-[10px] border-b border-zinc-800">
                   <tr>
@@ -1000,7 +1002,7 @@ export default function Dashboard() {
                         <td className="py-3 px-4 whitespace-nowrap">
                           <div className="flex items-center gap-2">
                             <span
-                              className={`inline-flex items-center whitespace-nowrap shrink-0 max-w-full px-2.5 py-1 rounded-full text-[10px] font-semibold ${modelBadgeClass(log.model)}`}
+                              className={`inline-flex items-center whitespace-nowrap shrink-0 max-w-full px-2.5 py-1 rounded-full text-[10px] font-semibold truncate break-all ${modelBadgeClass(log.model)}`}
                             >
                               {log.model}
                             </span>

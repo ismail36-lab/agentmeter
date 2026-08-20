@@ -106,7 +106,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center px-4 selection:bg-emerald-500/20">
+    <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center px-4 py-6 selection:bg-emerald-500/20 w-full max-w-full overflow-x-hidden">
 
       {/* Background decorative glow */}
       <div

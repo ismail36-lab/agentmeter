@@ -65,9 +65,9 @@ export function ApiKeyModal({ isOpen, onClose, onKeyCreated }: ApiKeyModalProps)
       <div className="relative w-full max-w-lg overflow-hidden bg-zinc-950 border border-zinc-800/90 rounded-2xl shadow-2xl text-zinc-100 p-6 space-y-5">
         
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-zinc-800/80 pb-4">
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between border-b border-zinc-800/80 pb-4">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
               <Key className="h-5 w-5" />
             </div>
             <div>
@@ -83,7 +83,7 @@ export function ApiKeyModal({ isOpen, onClose, onKeyCreated }: ApiKeyModalProps)
           </div>
           <button
             onClick={handleClose}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 transition-colors"
+            className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 transition-colors self-end sm:self-auto"
           >
             <X className="h-4 w-4" />
           </button>

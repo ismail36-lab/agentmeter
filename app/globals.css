@@ -11,6 +11,12 @@
     --muted:      240 4% 46%;     /* zinc-500 */
   }
 
+  html, body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
   body {
     background-color: #09090b;
     color: #fafafa;               /* zinc-50 */
@@ -22,6 +28,8 @@
 
 /* ─── Bento surface ─────────────────────────────────────────── */
 .bento-card {
+  width: 100%;
+  max-width: 100%;
   background: #121214;
   border: 1px solid rgba(63, 63, 70, 0.8);   /* zinc-700/80 */
   border-radius: 1rem;
