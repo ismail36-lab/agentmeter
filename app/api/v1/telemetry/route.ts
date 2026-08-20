@@ -180,32 +180,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const QUOTA_LIMITS: Record<string, number> = {
-      free: 1000,
-      pro: 250000,
-    };
-    const monthlyLimit = QUOTA_LIMITS[userPlan] ?? 1000;
-
-    const nowForQuota = new Date();
-    const firstDayOfMonth = new Date(nowForQuota.getFullYear(), nowForQuota.getMonth(), 1).toISOString();
-
-    let monthlyCount = 0;
+    // Query usage_logs table to count total logs for the current org/user
+    let totalLogsCount = 0;
     try {
-      const { count } = await supabaseAdmin
+      let countQuery = supabaseAdmin
         .from("usage_logs")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", userId ?? "")
-        .gte("created_at", firstDayOfMonth);
+        .select("id", { count: "exact", head: true });
 
-      monthlyCount = count ?? 0;
+      if (userId) {
+        countQuery = countQuery.eq("user_id", userId);
+      }
+
+      const { count } = await countQuery;
+      totalLogsCount = count ?? 0;
     } catch (err) {
       console.warn("Quota usage count notice:", err);
     }
 
-    // Enforce limit for free-tier users only
-    if (userPlan === "free" && monthlyCount >= monthlyLimit) {
+    // Enforce limit for free-tier users (count >= 1000) before any token/cost calculation or DB insert
+    if (totalLogsCount >= 1000 && userPlan === "free") {
       return NextResponse.json(
-        { error: "Monthly usage limit reached. Please upgrade to Pro." },
+        { error: "Monthly log limit reached" },
         { status: 429, headers: getCorsHeaders() }
       );
     }
