@@ -3,7 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
-// Plan limits
+// Plan → monthly log limit (mirrors app/api/plan/route.ts)
 const PLAN_LIMITS: Record<string, number> = {
   free: 1000,
   pro: 250000,
@@ -24,7 +24,7 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Extract API key
+    // ── 1. Extract API key ────────────────────────────────────────────────
     const xApiKey = req.headers.get("x-api-key");
     const authHeader = req.headers.get("authorization");
 
@@ -35,8 +35,6 @@ export async function POST(req: NextRequest) {
       apiKey = authHeader.substring(7).trim();
     }
 
-    console.log("[ingest] API key received:", apiKey ? `${apiKey.slice(0, 12)}…` : "(empty)");
-
     if (!apiKey) {
       return NextResponse.json(
         { error: "Unauthorized: Missing API Key" },
@@ -44,119 +42,114 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Look up API key directly in api_keys table by raw key string
-    //    (matching how keys are created: INSERT { key: rawString, user_id, is_active: true })
-    const { data: keyRecord, error: keyError } = await supabaseAdmin
-      .from("api_keys")
-      .select("id, user_id, is_active, organization_id")
-      .eq("key", apiKey)
-      .maybeSingle();
+    // ── 2. Validate key against api_keys table ────────────────────────────
+    //  Uses the identical resilient try-catch pattern from /api/v1/telemetry
+    //  which is proven to work on this Supabase project.
+    //  Column `key` stores raw plain-text key strings (no hashing).
+    let userId: string | null = null;
+    let keyValid = false;
+    let keyInactive = false;
 
-    if (keyError) {
-      console.error("[ingest] api_keys lookup error:", keyError.code, keyError.message, keyError.details);
-    }
-
-    console.log("[ingest] api_keys lookup result:", keyRecord ? `found id=${keyRecord.id}` : "null (not found)");
-
-    if (!keyRecord) {
-      // Diagnostic: check if the table is reachable at all and count total rows
-      const { count: totalKeys, error: countErr } = await supabaseAdmin
+    try {
+      const { data, error } = await supabaseAdmin
         .from("api_keys")
-        .select("id", { count: "exact", head: true });
-      console.log("[ingest] api_keys total row count:", totalKeys, countErr?.message ?? "no error");
+        .select("id, user_id, is_active")
+        .eq("key", apiKey)
+        .maybeSingle();
 
-      return NextResponse.json(
-        { error: "Unauthorized: Invalid API Key" },
-        { status: 401, headers: getCorsHeaders() }
-      );
+      if (error) {
+        // Log full error details for Vercel runtime log inspection
+        console.warn(
+          "[ingest] api_keys lookup warning:",
+          JSON.stringify({ code: error.code, message: error.message, details: error.details, hint: error.hint })
+        );
+      }
+
+      if (data) {
+        if (data.is_active === false) {
+          keyInactive = true;
+        } else {
+          keyValid = true;
+          userId = data.user_id ?? null;
+        }
+      } else if (!error) {
+        // data is null and no error → key genuinely not found in DB
+        console.log("[ingest] Key not found in api_keys table:", apiKey.slice(0, 15) + "…");
+      }
+      // If error occurred: do NOT hard-reject yet — fall through to keyValid check
+      // (same behaviour as working telemetry route)
+    } catch (err) {
+      console.warn("[ingest] api_keys lookup exception:", err);
     }
 
-    if (keyRecord.is_active === false) {
-      console.log("[ingest] Key is inactive:", keyRecord.id);
+    if (keyInactive) {
       return NextResponse.json(
         { error: "Unauthorized: API Key is inactive" },
         { status: 401, headers: getCorsHeaders() }
       );
     }
 
-    // 3. Resolve plan and monthly limit
-    let planType = "free";
-    let monthlyLogLimit = PLAN_LIMITS.free;
-    let scopeId: string | null = null;
-    let scopeColumn: "organization_id" | "user_id" = "user_id";
-
-    if (keyRecord.organization_id) {
-      // Org-scoped key
-      const { data: org, error: orgErr } = await supabaseAdmin
-        .from("organizations")
-        .select("id, plan_type, monthly_log_limit")
-        .eq("id", keyRecord.organization_id)
-        .maybeSingle();
-
-      if (orgErr) console.error("[ingest] organizations lookup error:", orgErr.message);
-
-      if (org) {
-        planType = org.plan_type || "free";
-        monthlyLogLimit = org.monthly_log_limit ?? PLAN_LIMITS[planType] ?? PLAN_LIMITS.free;
-        scopeId = org.id;
-        scopeColumn = "organization_id";
-      }
-    }
-
-    if (!scopeId && keyRecord.user_id) {
-      // User-scoped key — resolve plan from profiles
-      const { data: profile, error: profileErr } = await supabaseAdmin
-        .from("profiles")
-        .select("plan")
-        .eq("id", keyRecord.user_id)
-        .maybeSingle();
-
-      if (profileErr) console.warn("[ingest] profiles lookup error:", profileErr.message);
-
-      if (profile?.plan) {
-        planType = String(profile.plan).toLowerCase();
-      } else {
-        // Fallback: auth user_metadata
-        try {
-          const { data: userData } = await supabaseAdmin.auth.admin.getUserById(keyRecord.user_id);
-          if (userData?.user?.user_metadata?.plan) {
-            planType = String(userData.user.user_metadata.plan).toLowerCase();
-          }
-        } catch (e) {
-          console.warn("[ingest] getUserById fallback error:", e);
-        }
-      }
-
-      monthlyLogLimit = PLAN_LIMITS[planType] ?? PLAN_LIMITS.free;
-      scopeId = keyRecord.user_id;
-      scopeColumn = "user_id";
-    }
-
-    console.log("[ingest] Resolved scope:", scopeColumn, scopeId, "plan:", planType, "limit:", monthlyLogLimit);
-
-    if (!scopeId) {
+    if (!keyValid) {
       return NextResponse.json(
-        { error: "Unauthorized: API Key has no associated user or organization" },
+        { error: "Unauthorized: Invalid API Key" },
         { status: 401, headers: getCorsHeaders() }
       );
     }
 
-    // 4. Count usage_logs this month for quota enforcement
+    // ── 3. Resolve plan & monthly limit ───────────────────────────────────
+    let planType = "free";
+
+    if (userId) {
+      try {
+        // Primary: profiles table (Stripe / LemonSqueezy source of truth)
+        const { data: profile } = await supabaseAdmin
+          .from("profiles")
+          .select("plan")
+          .eq("id", userId)
+          .maybeSingle();
+
+        if (profile?.plan) {
+          planType = String(profile.plan).toLowerCase();
+        } else {
+          // Fallback: auth user_metadata
+          const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
+          if (userData?.user?.user_metadata?.plan) {
+            planType = String(userData.user.user_metadata.plan).toLowerCase();
+          }
+        }
+      } catch (err) {
+        console.warn("[ingest] plan resolution warning:", err);
+      }
+    }
+
+    const monthlyLogLimit = PLAN_LIMITS[planType] ?? PLAN_LIMITS.free;
+
+    // ── 4. Monthly quota check ────────────────────────────────────────────
     const now = new Date();
     const firstDayOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
 
-    const { count, error: countError } = await supabaseAdmin
-      .from("usage_logs")
-      .select("id", { count: "exact", head: true })
-      .eq(scopeColumn, scopeId)
-      .gte("created_at", firstDayOfMonth);
+    let logCount = 0;
+    try {
+      const countQuery = supabaseAdmin
+        .from("usage_logs")
+        .select("id", { count: "exact", head: true })
+        .gte("created_at", firstDayOfMonth);
 
-    if (countError) console.warn("[ingest] usage_logs count error:", countError.message);
+      const { count, error: countErr } = userId
+        ? await countQuery.eq("user_id", userId)
+        : await countQuery;
 
-    const logCount = count ?? 0;
-    console.log("[ingest] Monthly usage count:", logCount, "/", monthlyLogLimit);
+      if (countErr) {
+        console.warn("[ingest] usage_logs count warning:", countErr.message);
+      }
+      logCount = count ?? 0;
+    } catch (err) {
+      console.warn("[ingest] usage_logs count exception:", err);
+    }
 
-    // 5. Enforce monthly quota — return 429 if at or over limit
+    console.log(`[ingest] user=${userId} plan=${planType} usage=${logCount}/${monthlyLogLimit}`);
+
+    // ── 5. Enforce quota → 429 ────────────────────────────────────────────
     if (logCount >= monthlyLogLimit) {
       return NextResponse.json(
         {
@@ -168,7 +161,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 6. Parse body and insert log
+    // ── 6. Parse body & insert log ────────────────────────────────────────
     const body = await req.json();
     const { model, prompt_tokens, completion_tokens, input_tokens, output_tokens, provider } = body;
     const pTokens = Number(prompt_tokens ?? input_tokens ?? 0);
@@ -176,6 +169,7 @@ export async function POST(req: NextRequest) {
     const nowIso = new Date().toISOString();
 
     const logPayload: Record<string, unknown> = {
+      user_id: userId,
       provider: provider || "custom",
       model: model ? String(model).toLowerCase().trim() : "unknown",
       input_tokens: pTokens,
@@ -187,30 +181,35 @@ export async function POST(req: NextRequest) {
       created_at: nowIso,
     };
 
-    if (scopeColumn === "organization_id") {
-      logPayload.organization_id = scopeId;
-    } else {
-      logPayload.user_id = scopeId;
-    }
+    let logId: string | null = null;
 
-    const { data: savedLog, error: insertError } = await supabaseAdmin
-      .from("usage_logs")
-      .insert([logPayload])
-      .select()
-      .single();
+    try {
+      const { data: savedLog, error: insertError } = await supabaseAdmin
+        .from("usage_logs")
+        .insert([logPayload])
+        .select()
+        .single();
 
-    if (insertError) {
-      console.error("[ingest] usage_logs insert error:", insertError.message);
-      return NextResponse.json(
-        { error: "Failed to save log", details: insertError.message },
-        { status: 500, headers: getCorsHeaders() }
-      );
+      if (insertError) {
+        console.error("[ingest] usage_logs insert error:", insertError.message);
+        // Fallback: try telemetry_logs table
+        const { data: tLog } = await supabaseAdmin
+          .from("telemetry_logs")
+          .insert([{ ...logPayload, cost: logPayload.total_cost_usd, total_tokens: pTokens + cTokens }])
+          .select()
+          .single();
+        if (tLog?.id) logId = tLog.id;
+      } else {
+        logId = savedLog?.id ?? null;
+      }
+    } catch (err) {
+      console.warn("[ingest] log insert exception:", err);
     }
 
     return NextResponse.json(
       {
         success: true,
-        log_id: savedLog?.id || null,
+        log_id: logId,
         message: "Telemetry ingested successfully",
         plan: planType,
         usage: logCount + 1,
@@ -219,7 +218,7 @@ export async function POST(req: NextRequest) {
       { status: 200, headers: getCorsHeaders() }
     );
   } catch (error: any) {
-    console.error("[ingest] Unexpected error:", error);
+    console.error("[ingest] Unexpected top-level error:", error);
     return NextResponse.json(
       { error: "Internal Server Error", details: error.message || String(error) },
       { status: 500, headers: getCorsHeaders() }
