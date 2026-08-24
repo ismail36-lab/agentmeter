@@ -130,7 +130,7 @@ export default function Home() {
     if (planKey === "pro") {
       setLoadingPlan("pro");
       try {
-        // Check if user is authenticated before triggering Stripe Checkout
+        // Check if user is authenticated before triggering Lemon Squeezy Checkout
         const { data: sessionData } = await supabase.auth.getSession();
         if (!sessionData.session?.user) {
           // Unauthenticated — redirect to login with return context

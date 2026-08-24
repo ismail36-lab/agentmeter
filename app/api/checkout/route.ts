@@ -14,7 +14,9 @@ export async function POST(req: NextRequest) {
 
 async function handleCheckout(req: NextRequest) {
   const supabase = createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { searchParams } = new URL(req.url);
   let plan = searchParams.get("plan") || "pro";
@@ -28,7 +30,7 @@ async function handleCheckout(req: NextRequest) {
 
   const requestedPlan = String(plan).toLowerCase();
 
-  // If user is authenticated, upgrade plan in metadata
+  // If user is authenticated, optimistically upgrade plan in metadata as a fast-path
   if (user) {
     try {
       const updatedMetadata = {
@@ -45,47 +47,70 @@ async function handleCheckout(req: NextRequest) {
     }
   }
 
-  // Check if Stripe is configured
-  const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-  if (stripeSecretKey) {
+  // ── Lemon Squeezy Checkout ──────────────────────────────────────────────────
+  const lsApiKey = process.env.LEMONSQUEEZY_API_KEY;
+  const lsStoreId = process.env.LEMONSQUEEZY_STORE_ID;
+  const lsVariantId = process.env.LEMONSQUEEZY_PRO_VARIANT_ID;
+
+  if (lsApiKey && lsStoreId && lsVariantId) {
     try {
-      const priceId = process.env.STRIPE_PRO_PRICE_ID || "price_pro_monthly";
       const domain = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
 
-      const stripeRes = await fetch("https://api.stripe.com/v1/checkout/sessions", {
+      const lsPayload = {
+        data: {
+          type: "checkouts",
+          attributes: {
+            checkout_data: {
+              // Attach authenticated user ID so the webhook can map back to Supabase
+              custom: {
+                ...(user?.id ? { user_id: user.id } : {}),
+              },
+            },
+            product_options: {
+              redirect_url: `${domain}/dashboard?checkout=success&plan=${requestedPlan}`,
+            },
+          },
+          relationships: {
+            store: {
+              data: { type: "stores", id: String(lsStoreId) },
+            },
+            variant: {
+              data: { type: "variants", id: String(lsVariantId) },
+            },
+          },
+        },
+      };
+
+      const lsRes = await fetch("https://api.lemonsqueezy.com/v1/checkouts", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${stripeSecretKey}`,
-          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/vnd.api+json",
+          "Content-Type": "application/vnd.api+json",
+          Authorization: `Bearer ${lsApiKey}`,
         },
-        body: new URLSearchParams({
-          "payment_method_types[0]": "card",
-          "line_items[0][price]": priceId,
-          "line_items[0][quantity]": "1",
-          mode: "subscription",
-          success_url: `${domain}/dashboard?checkout=success&plan=${requestedPlan}`,
-          cancel_url: `${domain}/#pricing`,
-          // Pass the authenticated user's ID so the webhook can match the session to a Supabase profile
-          ...(user?.id ? { client_reference_id: user.id } : {}),
-          ...(user?.email ? { customer_email: user.email } : {}),
-        }).toString(),
+        body: JSON.stringify(lsPayload),
       });
 
-      if (stripeRes.ok) {
-        const stripeData = await stripeRes.json();
-        if (stripeData?.url) {
+      if (lsRes.ok) {
+        const lsData = await lsRes.json();
+        const checkoutUrl = lsData?.data?.attributes?.url;
+
+        if (checkoutUrl) {
           if (req.headers.get("accept")?.includes("text/html")) {
-            return NextResponse.redirect(stripeData.url);
+            return NextResponse.redirect(checkoutUrl);
           }
-          return NextResponse.json({ url: stripeData.url });
+          return NextResponse.json({ url: checkoutUrl });
         }
+      } else {
+        const errBody = await lsRes.text();
+        console.warn("Lemon Squeezy Checkout Error:", lsRes.status, errBody);
       }
     } catch (err) {
-      console.warn("Stripe Checkout Error, falling back to dashboard redirect:", err);
+      console.warn("Lemon Squeezy Checkout Error, falling back to dashboard redirect:", err);
     }
   }
 
-  // Sandbox / Default Fallback Redirect
+  // ── Sandbox / Default Fallback Redirect ────────────────────────────────────
   const redirectUrl = user
     ? `/dashboard?checkout=success&plan=${requestedPlan}`
     : `/login?plan=${requestedPlan}&checkout=pending`;

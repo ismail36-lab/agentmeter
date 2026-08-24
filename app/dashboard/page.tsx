@@ -210,7 +210,7 @@ export default function Dashboard() {
     }
   };
 
-  // Open Stripe Customer Portal for billing management
+  // Open Lemon Squeezy Customer Portal for billing management
   const handleManageBilling = async () => {
     setIsLoadingPortal(true);
     try {
@@ -648,7 +648,7 @@ export default function Dashboard() {
                     onClick={handleManageBilling}
                     disabled={isLoadingPortal}
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-emerald-950/30 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-900/40 transition-all"
-                    title="Open Stripe Customer Portal"
+                    title="Open Lemon Squeezy Customer Portal"
                   >
                     {isLoadingPortal ? (
                       <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
