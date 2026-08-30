@@ -83,12 +83,12 @@ export function ApiKeyManagement({
       {/* Header & Main Action */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
         <div>
-          <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2">
-            <Key className="h-4 w-4 text-emerald-400" />
+          <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2 font-sans tracking-tight">
+            <Key className="h-4 w-4 text-indigo-400" />
             API Key Management
           </h3>
-          <p className="text-xs text-zinc-400 mt-0.5">
-            Manage authentication keys used by AgentMeter SDK and HTTP endpoints.
+          <p className="text-xs text-zinc-400 mt-0.5 font-sans">
+            Manage authentication keys used by Meterix SDK and HTTP endpoints.
           </p>
         </div>
 
@@ -97,15 +97,15 @@ export function ApiKeyManagement({
             type="button"
             onClick={onRefresh}
             disabled={isLoading}
-            className="p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors border border-zinc-800 disabled:opacity-40"
+            className="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors border border-zinc-800 disabled:opacity-40"
             title="Refresh keys"
           >
-            <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
+            <RefreshCw className={`h-4 w-4 ${isLoading ? "animate-spin text-indigo-400" : ""}`} />
           </button>
           <button
             type="button"
             onClick={() => setIsModalOpen(true)}
-            className="py-2.5 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-xs flex items-center gap-2 transition-all shadow-md shadow-emerald-500/10"
+            className="py-2 px-3.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs flex items-center gap-2 transition-all shadow-sm"
           >
             <Plus className="h-4 w-4" />
             <span>Generate New API Key</span>
@@ -122,15 +122,15 @@ export function ApiKeyManagement({
             placeholder="Search API keys by name..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-emerald-500/50 font-mono transition-all"
+            className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-10 pr-4 py-2 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 font-mono transition-all"
           />
         </div>
       )}
 
       {/* Table Container */}
-      <div className="w-full max-w-full overflow-x-auto rounded-xl border border-zinc-800/80 bg-zinc-950/60">
+      <div className="w-full max-w-full overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900">
         <table className="w-full text-left text-xs font-mono">
-          <thead className="bg-zinc-900/60 text-zinc-400 uppercase tracking-wider text-[10px] border-b border-zinc-800">
+          <thead className="bg-zinc-900/50 text-zinc-400 uppercase tracking-wider text-[10px] border-b border-zinc-800">
             <tr>
               <th className="py-3 px-4">Key Name</th>
               <th className="py-3 px-4">Secret Key</th>

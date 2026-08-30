@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AgentMeter - LLM Telemetry & Cost Analytics",
+  title: "Meterix - LLM Telemetry & Cost Analytics",
   description: "Real-time usage tracking, token monitoring, and cost calculation for OpenAI and Anthropic models.",
 };
 

@@ -6,7 +6,7 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholde
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || 'placeholder_service_key';
 
 if (!supabaseUrl) {
-  console.warn("AgentMeter Warning: NEXT_PUBLIC_SUPABASE_URL is missing.");
+  console.warn("Meterix Warning: NEXT_PUBLIC_SUPABASE_URL is missing.");
 }
 
 // Global declaration for singleton caching in browser context

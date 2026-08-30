@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 
-/** Generate a unique AgentMeter API key string. */
-function generateApiKey(userId: string): string {
-  const prefix = userId.replace(/-/g, "").slice(0, 8);
+/** Generate a unique Meterix API key string with strictly unique secret strings & prefixes. */
+function generateApiKey(env: "live" | "test" = "live"): string {
+  const prefix = env === "test" ? "mx_test_" : "mx_live_";
+  const randomBytes = crypto.randomBytes(24);
   const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  const random = Array.from({ length: 24 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
-  return `am_${prefix}_${random}`;
+  const randomStr = Array.from(randomBytes, (b) => chars[b % chars.length]).join("");
+  return `${prefix}${randomStr}`;
 }
 
 // GET /api/keys — list all keys for the authenticated user
@@ -45,9 +47,11 @@ export async function POST(req: NextRequest) {
   }
 
   let name = "Default Key";
+  let env: "live" | "test" = "live";
   try {
     const body = await req.json();
     if (body?.name) name = String(body.name).slice(0, 80);
+    if (body?.environment === "test" || body?.is_test === true) env = "test";
   } catch {}
 
   // Enforce a soft cap of 10 keys per user
@@ -61,7 +65,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Key limit reached (10 active keys maximum)" }, { status: 400 });
   }
 
-  const key = generateApiKey(user.id);
+  const key = generateApiKey(env);
 
   const { data, error } = await supabaseAdmin
     .from("api_keys")

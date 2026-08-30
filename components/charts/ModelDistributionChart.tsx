@@ -22,10 +22,20 @@ interface ModelDistributionChartProps {
 }
 
 const DEFAULT_COLORS: Record<string, string> = {
-  "gpt-4o": "#10b981",          // emerald-500
-  "gpt-4o-mini": "#0ea5e9",     // sky-500
-  "claude-3-5-sonnet": "#8b5cf6", // violet-500
-  other: "#f59e0b",             // amber-500
+  // OpenAI Models -> Emerald Green
+  "gpt-4o": "#10b981",
+  "gpt-4o-mini": "#059669",
+  
+  // Anthropic Models -> Terracotta / Orange
+  "claude-3-5-sonnet": "#f97316",
+  "claude-3.5-sonnet": "#f97316",
+  
+  // Google Gemini Models -> Electric Blue
+  "gemini-1.5-pro": "#3b82f6",
+  "gemini-1.5-flash": "#60a5fa",
+  "gemini-2.0-flash": "#2563eb",
+  
+  other: "#f59e0b",
 };
 
 export function ModelDistributionChart({ data, totalSpend }: ModelDistributionChartProps) {
@@ -41,20 +51,20 @@ export function ModelDistributionChart({ data, totalSpend }: ModelDistributionCh
   const displayTotal = totalSpend !== undefined && totalSpend > 0 ? totalSpend : calculatedTotal;
 
   return (
-    <div className="bento-card p-6 flex flex-col justify-between h-[360px]">
+    <div className="bento-card bento-card-hover p-6 flex flex-col justify-between h-[360px] border border-zinc-800/80 bg-zinc-900/90">
       <div>
-        <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2">
-          <PieIcon className="h-4 w-4 text-violet-400" />
+        <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2 font-sans tracking-tight">
+          <PieIcon className="h-4 w-4 text-indigo-400" />
           Model Cost Breakdown
         </h3>
-        <p className="text-xs text-zinc-500 mt-0.5">
-          Proportional spend by LLM architecture
+        <p className="text-xs text-zinc-500 mt-0.5 font-sans">
+          Proportional spend by LLM provider architecture
         </p>
       </div>
 
       <div className="relative w-full flex-1 flex items-center justify-center my-2">
         {chartData.length === 0 ? (
-          <div className="text-xs text-zinc-500 text-center">
+          <div className="text-xs text-zinc-500 font-mono text-center">
             No model spend recorded yet
           </div>
         ) : (
@@ -83,9 +93,9 @@ export function ModelDistributionChart({ data, totalSpend }: ModelDistributionCh
                       const val = Number(dataItem.value);
                       const pct = displayTotal > 0 ? ((val / displayTotal) * 100).toFixed(1) : "0";
                       return (
-                        <div className="bg-zinc-900 border border-zinc-800 p-2.5 rounded-lg shadow-xl text-xs font-mono">
+                        <div className="bg-zinc-950 border border-zinc-800 p-2.5 rounded-lg shadow-xl text-xs font-mono">
                           <p className="text-zinc-200 font-semibold mb-1">{dataItem.name}</p>
-                          <p className="text-emerald-400 font-bold">
+                          <p className="text-indigo-400 font-bold">
                             ${val.toFixed(4)} ({pct}%)
                           </p>
                         </div>
@@ -107,11 +117,11 @@ export function ModelDistributionChart({ data, totalSpend }: ModelDistributionCh
       </div>
 
       {/* Legend list below chart */}
-      <div className="flex flex-wrap items-center justify-center gap-3 pt-2 border-t border-zinc-900">
+      <div className="flex flex-wrap items-center justify-center gap-3 pt-2 border-t border-zinc-800/80">
         {(chartData.length > 0 ? chartData : [
           { name: "gpt-4o", color: "#10b981" },
-          { name: "gpt-4o-mini", color: "#0ea5e9" },
-          { name: "claude-3-5-sonnet", color: "#8b5cf6" },
+          { name: "claude-3-5-sonnet", color: "#f97316" },
+          { name: "gemini-1.5-pro", color: "#3b82f6" },
         ]).map((item) => (
           <div key={item.name} className="flex items-center gap-1.5 text-xs text-zinc-400 font-mono">
             <span

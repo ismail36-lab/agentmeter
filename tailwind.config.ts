@@ -10,32 +10,33 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#090d16",
-        foreground: "#f8fafc",
+        background: "#09090b",
+        foreground: "#fafafa",
         card: {
-          DEFAULT: "#0f172a",
-          foreground: "#f8fafc",
+          DEFAULT: "#18181b",
+          foreground: "#fafafa",
         },
         primary: {
-          DEFAULT: "#10b981",
-          foreground: "#022c22",
+          DEFAULT: "#6366f1",
+          foreground: "#ffffff",
         },
         secondary: {
           DEFAULT: "#0ea5e9",
-          foreground: "#0c4a6e",
+          foreground: "#f8fafc",
         },
         accent: {
           DEFAULT: "#8b5cf6",
-          foreground: "#2e1065",
+          foreground: "#ffffff",
         },
         muted: {
-          DEFAULT: "#1e293b",
-          foreground: "#94a3b8",
+          DEFAULT: "#27272a",
+          foreground: "#a1a1aa",
         },
-        border: "#1e293b",
+        border: "#27272a",
       },
       fontFamily: {
-        mono: ["var(--font-geist-mono)", "ui-monospace", "monospace"],
+        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Monaco", "Consolas", "Liberation Mono", "Courier New", "monospace"],
+        sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "Helvetica Neue", "sans-serif"],
       },
     },
   },

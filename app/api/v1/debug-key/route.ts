@@ -4,7 +4,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/v1/debug-key?key=am_xxx
+ * GET /api/v1/debug-key?key=mx_live_xxx
  *
  * TEMPORARY diagnostic endpoint — reveals what Supabase returns for a given API key.
  * Remove or gate behind CRON_SECRET before going to production.

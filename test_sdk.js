@@ -1,10 +1,10 @@
 async function testTelemetry() {
   try {
-    const response = await fetch('https://agentmeter-umber.vercel.app/api/v1/telemetry', {
+    const response = await fetch('http://localhost:3000/api/v1/telemetry', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer am_0aa73e80_Yfi4gkEpg8IlWxesWVUJSilH'
+        'Authorization': 'Bearer mx_live_0aa73e80_Yfi4gkEpg8IlWxesWVUJSilH'
       },
       body: JSON.stringify({
         model: 'gpt-4o',

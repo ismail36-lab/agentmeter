@@ -67,7 +67,7 @@ export function ApiKeyModal({ isOpen, onClose, onKeyCreated }: ApiKeyModalProps)
         {/* Header */}
         <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between border-b border-zinc-800/80 pb-4">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
+            <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">
               <Key className="h-5 w-5" />
             </div>
             <div>
@@ -102,7 +102,7 @@ export function ApiKeyModal({ isOpen, onClose, onKeyCreated }: ApiKeyModalProps)
                 value={keyName}
                 onChange={(e) => setKeyName(e.target.value)}
                 autoFocus
-                className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/60 transition-all font-mono"
+                className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-4 py-2.5 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 focus:ring-1 focus:ring-indigo-500/60 transition-all font-mono"
               />
               <p className="text-[11px] text-zinc-500 mt-1.5">
                 Give your API key a descriptive name to easily track telemetry logs by key.
@@ -127,7 +127,7 @@ export function ApiKeyModal({ isOpen, onClose, onKeyCreated }: ApiKeyModalProps)
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-xs flex items-center gap-2 transition-all shadow-md shadow-emerald-500/10 disabled:opacity-40"
+                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs flex items-center gap-2 transition-all shadow-sm disabled:opacity-40"
               >
                 {isSubmitting ? (
                   <>
@@ -158,13 +158,13 @@ export function ApiKeyModal({ isOpen, onClose, onKeyCreated }: ApiKeyModalProps)
 
             {/* Secret Display Box */}
             <div className="relative group">
-              <div className="w-full bg-zinc-900 border border-zinc-800 rounded-xl p-3.5 text-xs font-mono text-emerald-400 break-all pr-24 selection:bg-emerald-950">
+              <div className="w-full bg-[#0c0d0e] border border-zinc-800 rounded-lg p-3.5 text-xs font-mono text-indigo-300 break-all pr-24 selection:bg-indigo-950">
                 {generatedKey}
               </div>
               <button
                 type="button"
                 onClick={handleCopy}
-                className="absolute right-2 top-2 bottom-2 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-xs flex items-center gap-1.5 transition-all shadow-sm"
+                className="absolute right-2 top-2 bottom-2 px-3 rounded-md bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs flex items-center gap-1.5 transition-all shadow-sm"
               >
                 {copied ? (
                   <>

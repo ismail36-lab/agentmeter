@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
         }
         apiKeyRecord = data;
         userId = data.user_id ?? null;
-      } else if (!error && apiKey.startsWith("am_test_")) {
+      } else if (!error && (apiKey.startsWith("mx_test_") || apiKey.startsWith("am_test_"))) {
         // Fallback for default test key
         apiKeyRecord = { id: "test_key_01", name: "Development Key", is_active: true };
       } else if (data === null) {

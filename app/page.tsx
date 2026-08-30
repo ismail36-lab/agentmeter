@@ -120,9 +120,9 @@ export default function Home() {
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
 
   const handleSelectPlan = async (planKey: string) => {
-    // 3. "Talk to Sales" (Enterprise) -> Opens mailto link support@agentmeter.io
+    // 3. "Talk to Sales" (Enterprise) -> Opens mailto link support@meterix.io
     if (planKey === "enterprise") {
-      window.location.href = "mailto:support@agentmeter.io";
+      window.location.href = "mailto:support@meterix.io";
       return;
     }
 
@@ -177,15 +177,15 @@ export default function Home() {
       <nav className="fixed top-0 inset-x-0 z-50 border-b border-zinc-900 bg-zinc-950/80 backdrop-blur-xl">
         <div className="max-w-6xl w-full mx-auto px-4 sm:px-6 py-3 sm:py-0 sm:h-14 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
           <span className="font-bold text-sm tracking-tight text-zinc-50 font-mono">
-            AgentMeter<span className="text-emerald-400">.</span>
+            Meterix<span className="text-indigo-400">.</span>
           </span>
           <div className="flex items-center gap-3">
-            <a href="#pricing" className="text-xs text-zinc-400 hover:text-zinc-50 transition-colors">
+            <a href="#pricing" className="text-xs text-zinc-400 hover:text-zinc-50 transition-colors font-sans">
               Pricing
             </a>
             <Link
               href="/login"
-              className="text-xs px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold transition-colors"
+              className="text-xs px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-all shadow-sm"
             >
               Get Started
             </Link>
@@ -195,30 +195,30 @@ export default function Home() {
 
       {/* ── Hero ─────────────────────────────────────────────── */}
       <section className="pt-28 pb-16 px-4 sm:px-6 py-6 text-center max-w-4xl mx-auto w-full">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-950/60 border border-emerald-900/60 text-emerald-400 text-xs font-mono mb-6">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-950/60 border border-indigo-800/60 text-indigo-400 text-xs font-mono mb-6">
+          <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
           Now supporting OpenAI, Anthropic &amp; Gemini
         </div>
-        <h1 className="text-4xl sm:text-6xl font-bold tracking-tight leading-tight mb-6">
+        <h1 className="text-4xl sm:text-6xl font-bold tracking-tight leading-tight mb-6 font-sans">
           LLM Cost Intelligence
           <br />
-          <span className="text-emerald-400">At Every Request</span>
+          <span className="text-indigo-400">At Every Request</span>
         </h1>
-        <p className="text-lg text-zinc-400 leading-relaxed max-w-2xl mx-auto mb-10">
-          Instrument any LLM API call with a single POST request. AgentMeter ingests token usage,
+        <p className="text-lg text-zinc-400 leading-relaxed max-w-2xl mx-auto mb-10 font-sans">
+          Instrument any LLM API call with a single POST request. Meterix ingests token usage,
           calculates exact cost, and surfaces actionable analytics — so your team ships faster without
           the surprise invoices.
         </p>
         <div className="flex flex-wrap items-center justify-center gap-4">
           <button
             onClick={() => handleSelectPlan("free")}
-            className="px-6 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-sm transition-all hover:shadow-lg hover:shadow-emerald-500/20"
+            className="px-5 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm transition-all shadow-sm"
           >
             Start for Free
           </button>
           <Link
             href="/dashboard"
-            className="px-6 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-semibold text-sm transition-colors"
+            className="px-5 py-2.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-medium text-sm transition-colors"
           >
             View Dashboard →
           </Link>
@@ -241,10 +241,10 @@ export default function Home() {
             {PLANS.map((plan) => (
               <div
                 key={plan.name}
-                className={`relative rounded-2xl p-6 flex flex-col gap-6 border transition-all w-full ${
+                className={`relative rounded-xl p-6 flex flex-col gap-6 border transition-all w-full ${
                   plan.highlight
-                    ? "bg-zinc-900 border-emerald-500/60 ring-1 ring-emerald-500/30 shadow-xl shadow-emerald-900/20"
-                    : "bg-zinc-900/60 border-zinc-800 hover:border-zinc-700"
+                    ? "bg-zinc-900 border-indigo-500/60 ring-1 ring-indigo-500/30 shadow-xl shadow-black/40"
+                    : "bg-zinc-900/90 border-zinc-800/80 hover:border-zinc-700"
                 }`}
               >
                 {/* Badge */}
@@ -252,8 +252,8 @@ export default function Home() {
                   <div
                     className={`absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full text-[10px] font-semibold whitespace-nowrap border ${
                       plan.highlight
-                        ? "bg-emerald-500 text-zinc-950 border-emerald-400"
-                        : "bg-violet-900/70 text-violet-300 border-violet-700/60"
+                        ? "bg-indigo-600 text-white border-indigo-500"
+                        : "bg-violet-950/80 text-violet-300 border-violet-800/60"
                     }`}
                   >
                     {plan.badge}
@@ -263,20 +263,20 @@ export default function Home() {
                 {/* Header */}
                 <div>
                   <p className="text-xs text-zinc-500 font-mono mb-1">{plan.name.toUpperCase()}</p>
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-4xl font-bold text-zinc-50">{plan.price}</span>
+                  <div className="flex items-baseline gap-1 font-mono">
+                    <span className="text-3xl sm:text-4xl font-bold text-zinc-50">{plan.price}</span>
                     <span className="text-sm text-zinc-500">{plan.period}</span>
                   </div>
-                  <p className="text-xs text-zinc-500 mt-1">{plan.subtitle}</p>
+                  <p className="text-xs text-zinc-400 mt-1 font-sans">{plan.subtitle}</p>
                 </div>
 
                 {/* CTA Button */}
                 <button
                   onClick={() => handleSelectPlan(plan.key)}
                   disabled={loadingPlan === plan.key}
-                  className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                  className={`w-full flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-medium transition-all ${
                     plan.highlight
-                      ? "bg-emerald-500 hover:bg-emerald-400 text-zinc-950 shadow-md shadow-emerald-900/30"
+                      ? "bg-indigo-600 hover:bg-indigo-500 text-white shadow-sm"
                       : "bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700/60"
                   }`}
                 >
@@ -384,7 +384,7 @@ export default function Home() {
             },
             {
               q: "Do you support custom models?",
-              a: "Yes. AgentMeter accepts any model name and will calculate costs if your model is in our pricing dictionary, or allow you to provide explicit cost values.",
+              a: "Yes. Meterix accepts any model name and will calculate costs if your model is in our pricing dictionary, or allow you to provide explicit cost values.",
             },
           ].map(({ q, a }) => (
             <div key={q} className="rounded-xl bg-zinc-900/60 border border-zinc-800 p-5">
@@ -402,7 +402,7 @@ export default function Home() {
 
       {/* ── Footer ─────────────────────────────────────────────── */}
       <footer className="border-t border-zinc-900 py-8 text-center text-xs text-zinc-600 font-mono">
-        <p>AgentMeter © 2026 • LLM Telemetry Infrastructure • Powered by Next.js &amp; Supabase</p>
+        <p>Meterix © 2026 • LLM Telemetry Infrastructure</p>
       </footer>
     </div>
   );

@@ -122,11 +122,11 @@ export default function LoginPage() {
 
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
-          <div className="h-12 w-12 rounded-2xl bg-zinc-900 border border-zinc-700/80 flex items-center justify-center mb-4 shadow-lg shadow-emerald-500/5">
-            <Zap className="h-5 w-5 text-emerald-400" />
+          <div className="h-12 w-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-4">
+            <Zap className="h-5 w-5 text-indigo-400" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-50">
-            AgentMeter
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-50 font-sans">
+            Meterix
           </h1>
           <p className="text-sm text-zinc-500 mt-1">
             {mode === "login" ? "Sign in to your account" : "Create a new account"}
@@ -179,14 +179,14 @@ export default function LoginPage() {
                   placeholder="you@example.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-zinc-900/80 border border-zinc-800 rounded-xl pl-10 pr-4 py-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20 transition-all"
+                  className="w-full bg-zinc-900/80 border border-zinc-800 rounded-lg pl-10 pr-4 py-2.5 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 focus:ring-1 focus:ring-indigo-500/20 font-mono transition-all"
                 />
               </div>
             </div>
 
             {/* Password */}
             <div className="space-y-1.5">
-              <label htmlFor="login-password" className="block text-xs font-medium text-zinc-400 uppercase tracking-wider">
+              <label htmlFor="login-password" className="block text-xs font-medium text-zinc-400 uppercase tracking-wider font-sans">
                 Password
               </label>
               <div className="relative">
@@ -200,7 +200,7 @@ export default function LoginPage() {
                   placeholder={mode === "signup" ? "Min. 6 characters" : "••••••••"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-zinc-900/80 border border-zinc-800 rounded-xl pl-10 pr-11 py-3 text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/20 transition-all"
+                  className="w-full bg-zinc-900/80 border border-zinc-800 rounded-lg pl-10 pr-11 py-2.5 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 focus:ring-1 focus:ring-indigo-500/20 font-mono transition-all"
                 />
                 <button
                   type="button"
@@ -234,7 +234,7 @@ export default function LoginPage() {
               type="submit"
               id="auth-submit-btn"
               disabled={isLoading}
-              className="w-full mt-2 py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:bg-emerald-500/40 text-zinc-950 font-semibold text-sm flex items-center justify-center gap-2 transition-all duration-200 shadow-lg shadow-emerald-500/10 disabled:shadow-none disabled:cursor-not-allowed"
+              className="w-full mt-2 py-2.5 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-600/40 text-white font-medium text-xs flex items-center justify-center gap-2 transition-all duration-200 shadow-sm disabled:cursor-not-allowed"
             >
               {isLoading ? (
                 <>
@@ -277,7 +277,7 @@ export default function LoginPage() {
 
         {/* Footer badge */}
         <p className="mt-6 text-center text-xs text-zinc-700 font-mono">
-          Secured by Supabase Auth • AgentMeter v1.0.0
+          Secured by Supabase Auth • Meterix v1.0.0
         </p>
       </div>
     </div>

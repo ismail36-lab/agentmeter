@@ -98,6 +98,8 @@ const MODEL_COLORS: Record<string, string> = {
   "gpt-4o": "#10b981",          // emerald-500
   "gpt-4o-mini": "#0ea5e9",     // sky-500
   "claude-3-5-sonnet": "#8b5cf6", // violet-500
+  "gemini-1.5-pro": "#3b82f6",   // blue-500
+  "gemini-1.5-flash": "#ec4899", // pink-500
   other: "#f59e0b",             // amber-500
 };
 
@@ -106,6 +108,10 @@ function modelBadgeClass(model: string) {
     return "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
   if (model === "gpt-4o-mini")
     return "bg-sky-500/10 text-sky-400 border border-sky-500/20";
+  if (model === "gemini-1.5-pro" || model === "gemini-2.0-flash")
+    return "bg-blue-500/10 text-blue-400 border border-blue-500/20";
+  if (model === "gemini-1.5-flash")
+    return "bg-pink-500/10 text-pink-400 border border-pink-500/20";
   return "bg-violet-500/10 text-violet-400 border border-violet-500/20";
 }
 
@@ -489,12 +495,12 @@ export default function Dashboard() {
 
           {/* Logo */}
           <div className="flex items-center space-x-3">
-            <div className="h-9 w-9 rounded-xl bg-zinc-900 border border-zinc-700/80 flex items-center justify-center">
-              <Zap className="h-4.5 w-4.5 text-emerald-400" />
+            <div className="h-9 w-9 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+              <Zap className="h-4.5 w-4.5 text-indigo-400" />
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-lg font-semibold tracking-tight text-zinc-50">
-                AgentMeter
+              <span className="text-lg font-semibold tracking-tight text-zinc-50 font-sans">
+                Meterix
               </span>
               <span className="text-[10px] font-mono px-1.5 py-0.5 rounded-md bg-zinc-800 text-zinc-400 border border-zinc-700/60">
                 v1.0.0
@@ -515,7 +521,7 @@ export default function Dashboard() {
               className="p-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-50 transition-colors"
               title="Refresh All Data"
             >
-              <RefreshCw className={`h-4 w-4 ${isGlobalLoading ? "animate-spin text-emerald-400" : ""}`} />
+              <RefreshCw className={`h-4 w-4 ${isGlobalLoading ? "animate-spin text-indigo-400" : ""}`} />
             </button>
 
             {/* Developer Docs Link */}
@@ -524,7 +530,7 @@ export default function Dashboard() {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-xs text-zinc-300 hover:text-zinc-50 transition-colors"
               title="Developer Documentation"
             >
-              <BookOpen className="h-3.5 w-3.5 text-emerald-400" />
+              <BookOpen className="h-3.5 w-3.5 text-indigo-400" />
               <span className="hidden sm:inline font-medium">Docs</span>
             </Link>
 
@@ -536,7 +542,7 @@ export default function Dashboard() {
                 <span
                   className={`ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold font-mono border ${
                     planDetails.plan === "pro"
-                      ? "bg-emerald-950/80 text-emerald-400 border-emerald-800/80 shadow-sm"
+                      ? "bg-indigo-950/80 text-indigo-400 border-indigo-800/80 shadow-sm"
                       : planDetails.plan === "enterprise"
                       ? "bg-violet-950/80 text-violet-400 border-violet-800/80 shadow-sm"
                       : "bg-zinc-800 text-zinc-400 border-zinc-700/60"
@@ -569,11 +575,11 @@ export default function Dashboard() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6 overflow-x-hidden">
 
         {/* ── Header Banner ──────────────────────────────────── */}
-        <div className="bento-card p-6 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+        <div className="bento-card p-6 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between border border-zinc-800/80 bg-zinc-900/90">
           <div>
-            <h1 className="text-xl font-semibold text-zinc-50 flex items-center gap-2">
+            <h1 className="text-xl font-semibold text-zinc-50 flex items-center gap-2 font-sans tracking-tight">
               LLM Telemetry &amp; Cost Analytics
-              <ShieldCheck className="h-4.5 w-4.5 text-emerald-400" />
+              <ShieldCheck className="h-4.5 w-4.5 text-indigo-400" />
             </h1>
             <p className="text-sm text-zinc-400 mt-1 max-w-2xl">
               Real-time usage metering, token tracking, and precise cost calculation for{" "}
@@ -729,72 +735,72 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
 
           {/* Total Spend */}
-          <div className="bento-card bento-card-hover p-5 w-full">
+          <div className="bento-card bento-card-hover p-5 w-full border border-zinc-800/80 bg-zinc-900/90 hover:border-zinc-700 transition-all duration-200">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Total Spend</span>
-              <div className="p-2 rounded-lg bg-zinc-800/80 text-emerald-400 border border-zinc-700/60">
+              <span className="text-xs font-mono font-medium text-zinc-400 uppercase tracking-wider">Total Spend</span>
+              <div className="p-2 rounded-lg bg-zinc-950 text-indigo-400 border border-zinc-800">
                 <DollarSign className="h-4 w-4" />
               </div>
             </div>
             <div className="mt-4 flex items-baseline justify-between">
-              <span className="text-3xl font-bold text-zinc-50 tracking-tight">
+              <span className="text-2xl sm:text-3xl font-bold font-mono text-zinc-50 tracking-tight">
                 ${metrics.totalSpend.toFixed(4)}
               </span>
-              <span className="text-xs font-medium text-emerald-400 flex items-center gap-0.5">
+              <span className="text-xs font-mono font-medium text-indigo-400 flex items-center gap-0.5">
                 USD
               </span>
             </div>
-            <p className="mt-1 text-xs text-zinc-600">Real-time aggregate LLM cost</p>
+            <p className="mt-1 text-xs text-zinc-500 font-sans">Real-time aggregate LLM cost</p>
           </div>
 
           {/* Total Tokens */}
-          <div className="bento-card bento-card-hover p-5 w-full">
+          <div className="bento-card bento-card-hover p-5 w-full border border-zinc-800/80 bg-zinc-900/90 hover:border-zinc-700 transition-all duration-200">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Total Tokens</span>
-              <div className="p-2 rounded-lg bg-zinc-800/80 text-sky-400 border border-zinc-700/60">
+              <span className="text-xs font-mono font-medium text-zinc-400 uppercase tracking-wider">Total Tokens</span>
+              <div className="p-2 rounded-lg bg-zinc-950 text-sky-400 border border-zinc-800">
                 <Cpu className="h-4 w-4" />
               </div>
             </div>
             <div className="mt-4 flex items-baseline justify-between">
-              <span className="text-3xl font-bold text-zinc-50 tracking-tight">
+              <span className="text-2xl sm:text-3xl font-bold font-mono text-zinc-50 tracking-tight">
                 {metrics.totalTokens.toLocaleString()}
               </span>
-              <span className="text-xs font-medium text-sky-400">Tokens</span>
+              <span className="text-xs font-mono font-medium text-sky-400">Tokens</span>
             </div>
-            <p className="mt-1 text-xs text-zinc-600">Prompt + completion tokens</p>
+            <p className="mt-1 text-xs text-zinc-500 font-sans">Prompt + completion tokens</p>
           </div>
 
           {/* API Ingestions */}
-          <div className="bento-card bento-card-hover p-5 w-full">
+          <div className="bento-card bento-card-hover p-5 w-full border border-zinc-800/80 bg-zinc-900/90 hover:border-zinc-700 transition-all duration-200">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">API Ingestions</span>
-              <div className="p-2 rounded-lg bg-zinc-800/80 text-violet-400 border border-zinc-700/60">
+              <span className="text-xs font-mono font-medium text-zinc-400 uppercase tracking-wider">API Ingestions</span>
+              <div className="p-2 rounded-lg bg-zinc-950 text-violet-400 border border-zinc-800">
                 <Activity className="h-4 w-4" />
               </div>
             </div>
             <div className="mt-4 flex items-baseline justify-between">
-              <span className="text-3xl font-bold text-zinc-50 tracking-tight">
+              <span className="text-2xl sm:text-3xl font-bold font-mono text-zinc-50 tracking-tight">
                 {metrics.totalRequests}
               </span>
-              <span className="text-xs font-medium text-violet-400">Logs</span>
+              <span className="text-xs font-mono font-medium text-violet-400">Logs</span>
             </div>
-            <p className="mt-1 text-xs text-zinc-600">Recorded telemetry logs</p>
+            <p className="mt-1 text-xs text-zinc-500 font-sans">Recorded telemetry logs</p>
           </div>
 
           {/* Top Model */}
-          <div className="bento-card bento-card-hover p-5 w-full">
+          <div className="bento-card bento-card-hover p-5 w-full border border-zinc-800/80 bg-zinc-900/90 hover:border-zinc-700 transition-all duration-200">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Top Model</span>
-              <div className="p-2 rounded-lg bg-zinc-800/80 text-amber-400 border border-zinc-700/60">
+              <span className="text-xs font-mono font-medium text-zinc-400 uppercase tracking-wider">Top Model</span>
+              <div className="p-2 rounded-lg bg-zinc-950 text-amber-400 border border-zinc-800">
                 <Zap className="h-4 w-4" />
               </div>
             </div>
             <div className="mt-4">
-              <span className="text-xl font-bold font-mono text-zinc-50 truncate break-all block">
+              <span className="text-lg sm:text-xl font-bold font-mono text-zinc-50 truncate break-all block">
                 {metrics.topModel}
               </span>
             </div>
-            <p className="mt-2 text-xs text-zinc-600">Highest spend model</p>
+            <p className="mt-2 text-xs text-zinc-500 font-sans">Highest spend model</p>
           </div>
         </div>
 
@@ -830,13 +836,13 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
 
           {/* API Tester */}
-          <div className="bento-card p-6 space-y-4 sm:col-span-2 lg:col-span-1 w-full">
+          <div className="bento-card p-6 space-y-4 sm:col-span-2 lg:col-span-1 w-full border border-zinc-800/80 bg-zinc-900/90">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2">
-                <Terminal className="h-4 w-4 text-emerald-400" />
+              <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2 font-sans tracking-tight">
+                <Terminal className="h-4 w-4 text-indigo-400" />
                 Ingestion API Tester
               </h3>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-zinc-900 text-zinc-400 border border-zinc-800">
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-zinc-950 text-zinc-400 border border-zinc-800">
                 POST /api/v1/telemetry
               </span>
             </div>
@@ -875,6 +881,8 @@ export default function Dashboard() {
                   <option value="gpt-4o">gpt-4o ($2.50 / $10.00 per 1M)</option>
                   <option value="gpt-4o-mini">gpt-4o-mini ($0.15 / $0.60 per 1M)</option>
                   <option value="claude-3-5-sonnet">claude-3-5-sonnet ($3.00 / $15.00 per 1M)</option>
+                  <option value="gemini-1.5-pro">gemini-1.5-pro ($1.25 / $5.00 per 1M)</option>
+                  <option value="gemini-1.5-flash">gemini-1.5-flash ($0.075 / $0.30 per 1M)</option>
                 </select>
               </div>
 
@@ -902,7 +910,7 @@ export default function Dashboard() {
               <button
                 onClick={handleSendTestTelemetry}
                 disabled={isSendingTest || !testApiKey}
-                className="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700/80 hover:border-zinc-600 text-zinc-50 font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-40"
+                className="w-full py-2.5 px-4 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-xs flex items-center justify-center gap-2 transition-all shadow-sm disabled:opacity-40"
               >
                 {isSendingTest ? (
                   <>
@@ -920,10 +928,10 @@ export default function Dashboard() {
 
             {/* Test Result */}
             {testResult && (
-              <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-[11px] font-mono space-y-1 w-full">
+              <div className="p-3 rounded-lg bg-[#0c0d0e] border border-zinc-800 text-[11px] font-mono space-y-1 w-full">
                 <div className="flex items-center justify-between text-zinc-500">
                   <span>API Response:</span>
-                  <span className={testResult.success ? "text-emerald-400" : "text-red-400"}>
+                  <span className={testResult.success ? "text-emerald-400" : "text-rose-400"}>
                     {testResult.success ? "200 OK" : "Error"}
                   </span>
                 </div>
@@ -937,14 +945,14 @@ export default function Dashboard() {
           </div>
 
           {/* Telemetry Table */}
-          <div className="sm:col-span-2 lg:col-span-3 bento-card p-6 space-y-4 flex flex-col w-full">
+          <div className="sm:col-span-2 lg:col-span-3 bento-card p-6 space-y-4 flex flex-col w-full border border-zinc-800/80 bg-zinc-900/90">
             <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
               <div>
-                <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2">
-                  <Clock className="h-4 w-4 text-violet-400" />
+                <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2 font-sans tracking-tight">
+                  <Clock className="h-4 w-4 text-indigo-400" />
                   Live Telemetry Activity Log
                 </h3>
-                <p className="text-xs text-zinc-500 mt-0.5">Recent API logs ingested into Supabase usage_logs</p>
+                <p className="text-xs text-zinc-500 mt-0.5 font-sans">Recent API logs ingested into Supabase usage_logs</p>
               </div>
 
               <div className="flex items-center gap-2">
@@ -952,20 +960,22 @@ export default function Dashboard() {
                 <select
                   value={selectedFilterModel}
                   onChange={(e) => setSelectedFilterModel(e.target.value)}
-                  className="bg-zinc-900 border border-zinc-800 text-xs rounded-lg px-2.5 py-1.5 text-zinc-300 focus:outline-none focus:border-zinc-600 transition-colors"
+                  className="bg-zinc-950 border border-zinc-800 text-xs rounded-lg px-2.5 py-1.5 text-zinc-300 focus:outline-none focus:border-indigo-500/60 font-mono transition-colors"
                 >
                   <option value="all">All Models</option>
                   <option value="gpt-4o">gpt-4o</option>
                   <option value="gpt-4o-mini">gpt-4o-mini</option>
                   <option value="claude-3-5-sonnet">claude-3-5-sonnet</option>
+                  <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                  <option value="gemini-1.5-flash">gemini-1.5-flash</option>
                 </select>
               </div>
             </div>
 
             {/* Table */}
-            <div className="w-full max-w-full overflow-x-auto rounded-xl border border-zinc-800/80 bg-zinc-950/60">
+            <div className="w-full max-w-full overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900">
               <table className="w-full text-left text-xs font-mono">
-                <thead className="bg-zinc-900/60 text-zinc-500 uppercase tracking-wider text-[10px] border-b border-zinc-800">
+                <thead className="bg-zinc-900/50 text-zinc-400 uppercase tracking-wider text-[10px] border-b border-zinc-800">
                   <tr>
                     <th className="py-3 px-4 whitespace-nowrap">Time</th>
                     <th className="py-3 px-4 min-w-[10rem] whitespace-nowrap">Model</th>
@@ -1022,7 +1032,7 @@ export default function Dashboard() {
                         <td className="py-3 px-4 font-semibold text-zinc-200">
                           {(log.total_tokens ?? ((log.prompt_tokens ?? log.input_tokens ?? 0) + (log.completion_tokens ?? log.output_tokens ?? 0))).toLocaleString()}
                         </td>
-                        <td className="py-3 px-4 text-right text-emerald-400 font-semibold">
+                        <td className="py-3 px-4 text-right text-indigo-400 font-semibold font-mono">
                           ${Number(log.cost ?? log.total_cost_usd ?? 0).toFixed(6)}
                         </td>
                       </tr>
@@ -1037,7 +1047,7 @@ export default function Dashboard() {
 
       {/* ── Footer ─────────────────────────────────────────────── */}
       <footer className="border-t border-zinc-900 py-5 text-center text-xs text-zinc-600 font-mono">
-        AgentMeter Telemetry Infrastructure • Powered by Next.js 14 &amp; Supabase
+        Meterix Telemetry Infrastructure
       </footer>
     </div>
   );
