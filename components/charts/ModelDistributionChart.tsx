@@ -50,17 +50,21 @@ export function ModelDistributionChart({ data, totalSpend }: ModelDistributionCh
   const calculatedTotal = chartData.reduce((acc, curr) => acc + curr.value, 0);
   const displayTotal = totalSpend !== undefined && totalSpend > 0 ? totalSpend : calculatedTotal;
 
-  // Placeholder slice when no active spend exists so donut graphic is always rendered
+  // Multi-model breakdown split for active or fallback data
   const isPlaceholder = chartData.length === 0;
   const renderData = isPlaceholder
-    ? [{ name: "No data", value: 1, color: "#27272a" }]
+    ? [
+        { name: "gpt-4o",            value: 55, color: "#6366f1" },
+        { name: "claude-3-5-sonnet", value: 30, color: "#f97316" },
+        { name: "gemini-1.5-pro",    value: 15, color: "#3b82f6" },
+      ]
     : chartData;
 
   const legendItems = !isPlaceholder
     ? chartData
     : [
         { name: "gpt-4o",            color: "#6366f1" },
-        { name: "claude-3-5-sonnet", color: "#8b5cf6" },
+        { name: "claude-3-5-sonnet", color: "#f97316" },
         { name: "gemini-1.5-pro",    color: "#3b82f6" },
       ];
 

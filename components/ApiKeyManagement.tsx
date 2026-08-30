@@ -158,10 +158,17 @@ export function ApiKeyManagement({
             ) : (
               filteredKeys.map((item) => {
                 const isVisible = Boolean(visibleKeyIds[item.id]);
-                const maskedKey = item.key.length > 12
-                  ? `${item.key.slice(0, 10)}••••••••••••••••••••`
-                  : item.key;
-                const displayKey = isVisible ? item.key : maskedKey;
+                // Extract actual unique key prefix from database record
+                const getMaskedKey = (rawKey: string) => {
+                  if (!rawKey) return "";
+                  if (rawKey.startsWith("mx_live_") || rawKey.startsWith("mx_test_")) {
+                    const prefixPart = rawKey.slice(0, 16);
+                    return `${prefixPart}••••••••••••••••`;
+                  }
+                  const prefixPart = rawKey.slice(0, 12);
+                  return `${prefixPart}••••••••••••••••`;
+                };
+                const displayKey = isVisible ? item.key : getMaskedKey(item.key);
 
                 return (
                   <tr key={item.id} className="hover:bg-zinc-900/40 transition-colors">

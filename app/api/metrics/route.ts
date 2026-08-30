@@ -7,10 +7,14 @@ export const revalidate = 0;
 export const fetchCache = "force-no-store";
 
 const MODEL_COLORS: Record<string, string> = {
-  "gpt-4o": "#10b981",          // emerald-500
-  "gpt-4o-mini": "#0ea5e9",     // sky-500
-  "claude-3-5-sonnet": "#8b5cf6", // violet-500
-  other: "#f59e0b",             // amber-500
+  "gpt-4o": "#6366f1",          // Indigo
+  "gpt-4o-mini": "#818cf8",     // Light Indigo
+  "claude-3-5-sonnet": "#f97316", // Terracotta / Orange
+  "claude-3.5-sonnet": "#f97316",
+  "gemini-1.5-pro": "#3b82f6",   // Electric Blue
+  "gemini-1.5-flash": "#60a5fa", // Light Blue
+  "gemini-2.0-flash": "#2563eb",
+  other: "#f59e0b",             // Amber
 };
 
 /** Helper to parse spend/cost from log row */
@@ -61,10 +65,96 @@ export async function GET(req: NextRequest) {
 
     const userLogs = logs || [];
 
-    // Calculate core metrics
+    // Fallback: If user has 0 logs, seed realistic mock demo metrics, caching stats, environment & agent breakdown
+    if (userLogs.length === 0) {
+      const demoSpend = 14.8250;
+      const demoTokens = 1284500;
+      const demoRequests = 342;
+      const demoTopModel = "gpt-4o";
+
+      const demoModelBreakdown = [
+        { name: "gpt-4o", value: 8.4500, color: "#6366f1" },
+        { name: "claude-3-5-sonnet", value: 4.8250, color: "#f97316" },
+        { name: "gemini-1.5-pro", value: 1.5500, color: "#3b82f6" },
+      ];
+
+      const demoEnvironmentBreakdown = [
+        { name: "production", spend: 11.2400, requests: 245, percentage: 75.8 },
+        { name: "staging", spend: 2.8500, requests: 68, percentage: 19.2 },
+        { name: "development", spend: 0.7350, requests: 29, percentage: 5.0 },
+      ];
+
+      const demoAgentBreakdown = [
+        { name: "customer-support-bot", spend: 6.8400, requests: 142, model: "gpt-4o" },
+        { name: "code-review-assistant", spend: 4.8250, requests: 98, model: "claude-3-5-sonnet" },
+        { name: "doc-summarizer", spend: 2.4250, requests: 74, model: "gemini-1.5-pro" },
+        { name: "triage-router", spend: 0.7350, requests: 28, model: "gpt-4o-mini" },
+      ];
+
+      const demoCachingMetrics = {
+        totalCachedTokens: 412500,
+        cacheHitRate: 32.1,
+        totalSavingsUSD: 3.7125,
+      };
+
+      const demoTrend = [];
+      const now = new Date();
+      for (let i = 29; i >= 0; i--) {
+        const d = new Date(now);
+        d.setDate(d.getDate() - i);
+        const label = d.toLocaleDateString("en-US", { month: "short", day: "2-digit" });
+        const baseSpend = 0.25 + Math.sin(i * 0.4) * 0.15 + (i % 7 === 0 ? 0.35 : 0.05);
+        const spendVal = Number(baseSpend.toFixed(4));
+        const tokensVal = Math.round(spendVal * 85000);
+        demoTrend.push({
+          date: label,
+          cost: spendVal,
+          spend: spendVal,
+          tokens: tokensVal,
+        });
+      }
+
+      return NextResponse.json(
+        {
+          is_demo: true,
+          metrics: {
+            totalSpend: demoSpend,
+            totalTokens: demoTokens,
+            totalRequests: demoRequests,
+            topModel: demoTopModel,
+          },
+          cachingMetrics: demoCachingMetrics,
+          environmentBreakdown: demoEnvironmentBreakdown,
+          agentBreakdown: demoAgentBreakdown,
+          dailyTrend: demoTrend,
+          daily_trends: demoTrend,
+          modelBreakdown: demoModelBreakdown,
+          model_breakdown: demoModelBreakdown,
+        },
+        { headers: NO_CACHE_HEADERS }
+      );
+    }
+
+    // Calculate core metrics for real logs
     const totalSpend = userLogs.reduce((acc, curr) => acc + getLogCost(curr), 0);
     const totalTokens = userLogs.reduce((acc, curr) => acc + getLogTokens(curr), 0);
     const totalRequests = userLogs.length;
+
+    // Prompt Caching metrics
+    let totalCachedTokens = 0;
+    let totalInputTokens = 0;
+    let totalSavingsUSD = 0;
+
+    userLogs.forEach((log) => {
+      const input = Number(log.input_tokens ?? log.prompt_tokens ?? 0);
+      const cached = Number(log.cached_tokens ?? log.metadata?.cached_tokens ?? 0);
+      totalInputTokens += input;
+      totalCachedTokens += cached;
+      const rate = (log.provider || "").toLowerCase() === "anthropic" ? 0.000003 * 0.90 : 0.0000025 * 0.50;
+      totalSavingsUSD += cached * rate;
+    });
+
+    const cacheHitRate = totalInputTokens > 0 ? Number(((totalCachedTokens / totalInputTokens) * 100).toFixed(1)) : 0;
 
     // Top model calculation
     const modelSpendMap: Record<string, number> = {};
@@ -81,6 +171,41 @@ export async function GET(req: NextRequest) {
         topModel = model;
       }
     });
+
+    // Environment Breakdown calculation
+    const envMap: Record<string, { spend: number; requests: number }> = {};
+    userLogs.forEach((log) => {
+      const env = (log.environment || log.metadata?.environment || "production").toLowerCase();
+      if (!envMap[env]) envMap[env] = { spend: 0, requests: 0 };
+      envMap[env].spend += getLogCost(log);
+      envMap[env].requests += 1;
+    });
+
+    const environmentBreakdown = Object.entries(envMap).map(([name, data]) => ({
+      name,
+      spend: Number(data.spend.toFixed(4)),
+      requests: data.requests,
+      percentage: totalSpend > 0 ? Number(((data.spend / totalSpend) * 100).toFixed(1)) : 0,
+    }));
+
+    // Agent Breakdown calculation
+    const agentMap: Record<string, { spend: number; requests: number; model: string }> = {};
+    userLogs.forEach((log) => {
+      const agent = log.agent_name || log.metadata?.agent_name || "default-agent";
+      if (!agentMap[agent]) agentMap[agent] = { spend: 0, requests: 0, model: log.model || "gpt-4o" };
+      agentMap[agent].spend += getLogCost(log);
+      agentMap[agent].requests += 1;
+    });
+
+    const agentBreakdown = Object.entries(agentMap)
+      .map(([name, data]) => ({
+        name,
+        spend: Number(data.spend.toFixed(4)),
+        requests: data.requests,
+        model: data.model,
+      }))
+      .sort((a, b) => b.spend - a.spend)
+      .slice(0, 5);
 
     // Daily trend (last 30 days)
     const daysMap: Record<string, { cost: number; spend: number; tokens: number }> = {};
@@ -114,16 +239,10 @@ export async function GET(req: NextRequest) {
     }));
 
     // Model breakdown for Donut chart
-    const modelBreakdownMap: Record<string, number> = {
-      "gpt-4o": 0,
-      "gpt-4o-mini": 0,
-      "claude-3-5-sonnet": 0,
-    };
-
+    const modelBreakdownMap: Record<string, number> = {};
     userLogs.forEach((log) => {
       const m = log.model || "other";
-      const key = m in modelBreakdownMap ? m : "other";
-      modelBreakdownMap[key] = (modelBreakdownMap[key] || 0) + getLogCost(log);
+      modelBreakdownMap[m] = (modelBreakdownMap[m] || 0) + getLogCost(log);
     });
 
     const modelBreakdown = Object.entries(modelBreakdownMap).map(([name, value]) => ({
@@ -134,12 +253,20 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(
       {
+        is_demo: false,
         metrics: {
           totalSpend: Number(totalSpend.toFixed(4)),
           totalTokens,
           totalRequests,
           topModel,
         },
+        cachingMetrics: {
+          totalCachedTokens,
+          cacheHitRate,
+          totalSavingsUSD: Number(totalSavingsUSD.toFixed(4)),
+        },
+        environmentBreakdown,
+        agentBreakdown,
         dailyTrend,
         daily_trends: dailyTrend,
         modelBreakdown,

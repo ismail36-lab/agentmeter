@@ -73,6 +73,9 @@ interface UsageLog {
   is_estimated?: boolean;
   api_key?: string;
   user_id?: string;
+  environment?: string;
+  agent_name?: string;
+  cached_tokens?: number;
   metadata?: any;
 }
 
@@ -138,6 +141,29 @@ export default function Dashboard() {
   const [modelBreakdown, setModelBreakdown] = useState<ModelBreakdownItem[]>([]);
   const [logs, setLogs] = useState<UsageLog[]>([]);
   const [selectedFilterModel, setSelectedFilterModel] = useState<string>("all");
+  const [selectedFilterEnv, setSelectedFilterEnv] = useState<string>("all");
+
+  const [cachingMetrics, setCachingMetrics] = useState<{
+    totalCachedTokens: number;
+    cacheHitRate: number;
+    totalSavingsUSD: number;
+  }>({
+    totalCachedTokens: 0,
+    cacheHitRate: 0,
+    totalSavingsUSD: 0,
+  });
+  const [environmentBreakdown, setEnvironmentBreakdown] = useState<{
+    name: string;
+    spend: number;
+    requests: number;
+    percentage: number;
+  }[]>([]);
+  const [agentBreakdown, setAgentBreakdown] = useState<{
+    name: string;
+    spend: number;
+    requests: number;
+    model: string;
+  }[]>([]);
 
   // API Key Management State
   const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>([]);
@@ -293,6 +319,9 @@ export default function Dashboard() {
         if (trends) setDailyTrend(trends);
         const breakdown = data.model_breakdown || data.modelBreakdown;
         if (breakdown) setModelBreakdown(breakdown);
+        if (data.cachingMetrics) setCachingMetrics(data.cachingMetrics);
+        if (data.environmentBreakdown) setEnvironmentBreakdown(data.environmentBreakdown);
+        if (data.agentBreakdown) setAgentBreakdown(data.agentBreakdown);
       }
     } catch (err) {
       console.warn("Failed to fetch metrics:", err);
@@ -440,11 +469,16 @@ export default function Dashboard() {
 
   // Filtered Logs for Table
   const filteredLogs = useMemo(() => {
-    if (selectedFilterModel === "all") return logs;
-    return logs.filter(
-      (log) => log.model.toLowerCase() === selectedFilterModel.toLowerCase()
-    );
-  }, [logs, selectedFilterModel]);
+    return logs.filter((log) => {
+      const matchesModel =
+        selectedFilterModel === "all" ||
+        log.model.toLowerCase() === selectedFilterModel.toLowerCase();
+      const logEnv = (log.environment || log.metadata?.environment || "production").toLowerCase();
+      const matchesEnv =
+        selectedFilterEnv === "all" || logEnv === selectedFilterEnv.toLowerCase();
+      return matchesModel && matchesEnv;
+    });
+  }, [logs, selectedFilterModel, selectedFilterEnv]);
 
   // Handle Ingestion API Test Payload Submission
   const handleSendTestTelemetry = async () => {
@@ -544,16 +578,10 @@ export default function Dashboard() {
                   className={`ml-1 inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold font-mono border ${
                     planDetails.plan === "pro"
                       ? "bg-indigo-950/80 text-indigo-400 border-indigo-800/80 shadow-sm"
-                      : planDetails.plan === "enterprise"
-                      ? "bg-violet-950/80 text-violet-400 border-violet-800/80 shadow-sm"
                       : "bg-zinc-800 text-zinc-400 border-zinc-700/60"
                   }`}
                 >
-                  {planDetails.plan === "pro"
-                    ? "PRO TIER"
-                    : planDetails.plan === "enterprise"
-                    ? "ENTERPRISE"
-                    : "FREE SANDBOX"}
+                  {planDetails.plan === "pro" ? "PRO TIER" : "FREE SANDBOX"}
                 </span>
               </div>
             )}
@@ -622,16 +650,10 @@ export default function Dashboard() {
                     className={`px-2.5 py-0.5 rounded text-[10px] font-bold font-mono border ${
                       planDetails.plan === "pro"
                         ? "bg-indigo-950/80 text-indigo-400 border-indigo-800/60"
-                        : planDetails.plan === "enterprise"
-                        ? "bg-violet-950/80 text-violet-400 border-violet-800/60"
                         : "bg-zinc-800 text-zinc-400 border-zinc-700/60"
                     }`}
                   >
-                    {planDetails.plan === "pro"
-                      ? "PRO TIER"
-                      : planDetails.plan === "enterprise"
-                      ? "ENTERPRISE"
-                      : "FREE SANDBOX"}
+                    {planDetails.plan === "pro" ? "PRO TIER" : "FREE SANDBOX"}
                   </span>
                 </div>
                 <p className="text-xs text-zinc-400 mt-1">
@@ -685,7 +707,7 @@ export default function Dashboard() {
                   ) : (
                     <Zap className="h-4 w-4 flex-shrink-0" />
                   )}
-                  Upgrade to Pro ($49/mo)
+                  Upgrade to Pro ($99/mo)
                 </button>
               )}
             </div>
@@ -832,6 +854,123 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* ── Prompt Caching Intelligence Banner ────────────────── */}
+        <div className="bento-card p-5 border border-indigo-900/50 bg-gradient-to-r from-indigo-950/40 via-zinc-900/90 to-zinc-900/90 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 shrink-0">
+              <Zap className="h-5 w-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="text-sm font-semibold text-zinc-100 font-sans">Prompt Caching Intelligence</h4>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                  {cachingMetrics.cacheHitRate}% CACHE HIT RATE
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5 font-sans">
+                Automatic prompt caching discounts applied to repetitive system prompts &amp; context headers
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-6 font-mono text-xs shrink-0 self-end sm:self-auto">
+            <div>
+              <span className="text-zinc-500 block text-[10px] uppercase">Cached Tokens</span>
+              <span className="text-zinc-100 font-bold">{cachingMetrics.totalCachedTokens.toLocaleString()}</span>
+            </div>
+            <div>
+              <span className="text-zinc-500 block text-[10px] uppercase">Cache Savings</span>
+              <span className="text-indigo-400 font-bold">${cachingMetrics.totalSavingsUSD.toFixed(4)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Metadata & Environment Analytics Bento Section ────────────────── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full">
+          {/* Environment Distribution */}
+          <div className="bento-card p-5 border border-zinc-800/80 bg-zinc-900/90 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2 font-sans tracking-tight">
+                  <ShieldCheck className="h-4 w-4 text-indigo-400" />
+                  Environment Breakdown
+                </h3>
+                <span className="text-xs font-mono text-zinc-500">By Deployment Tag</span>
+              </div>
+              <p className="text-xs text-zinc-400 mb-4 font-sans">
+                Cost distribution across production, staging, and development environments.
+              </p>
+            </div>
+            <div className="space-y-3 font-mono text-xs">
+              {environmentBreakdown.map((env) => (
+                <div key={env.name} className="space-y-1">
+                  <div className="flex items-center justify-between text-zinc-300">
+                    <span className="capitalize font-medium flex items-center gap-2">
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          env.name === "production"
+                            ? "bg-indigo-400"
+                            : env.name === "staging"
+                            ? "bg-sky-400"
+                            : "bg-zinc-500"
+                        }`}
+                      />
+                      {env.name}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-zinc-500 font-sans">{env.requests} reqs</span>
+                      <span className="font-semibold text-zinc-100">${env.spend.toFixed(4)} ({env.percentage}%)</span>
+                    </div>
+                  </div>
+                  <div className="w-full bg-zinc-950 rounded-full h-1.5 overflow-hidden border border-zinc-800/60">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        env.name === "production"
+                          ? "bg-indigo-500"
+                          : env.name === "staging"
+                          ? "bg-sky-500"
+                          : "bg-zinc-600"
+                      }`}
+                      style={{ width: `${Math.min(env.percentage, 100)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Agent Intelligence Breakdown */}
+          <div className="bento-card p-5 border border-zinc-800/80 bg-zinc-900/90 flex flex-col justify-between">
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2 font-sans tracking-tight">
+                  <Cpu className="h-4 w-4 text-indigo-400" />
+                  Top AI Agents Breakdown
+                </h3>
+                <span className="text-xs font-mono text-zinc-500">By Agent Identifier</span>
+              </div>
+              <p className="text-xs text-zinc-400 mb-4 font-sans">
+                Granular cost, model assignment, and execution counts per AI Agent.
+              </p>
+            </div>
+            <div className="space-y-2.5 font-mono text-xs">
+              {agentBreakdown.map((agent) => (
+                <div
+                  key={agent.name}
+                  className="flex items-center justify-between p-2 rounded-lg bg-zinc-950/60 border border-zinc-800/60 text-zinc-300"
+                >
+                  <div className="min-w-0 pr-2">
+                    <p className="font-semibold text-zinc-200 truncate">{agent.name}</p>
+                    <p className="text-[10px] text-zinc-500 font-sans">{agent.model} • {agent.requests} requests</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="font-bold text-indigo-400">${agent.spend.toFixed(4)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
         {/* ── API Key Management Bento Card ─────────────────── */}
         <ApiKeyManagement
           apiKeys={apiKeys}
@@ -882,7 +1021,7 @@ export default function Dashboard() {
                   ) : (
                     apiKeys.map((k) => (
                       <option key={k.id} value={k.key}>
-                        {k.name} ({k.key.slice(0, 10)}…)
+                        {k.name} ({k.key.startsWith("mx_") ? k.key.slice(0, 16) : k.key.slice(0, 12)}…)
                       </option>
                     ))
                   )}
@@ -975,6 +1114,16 @@ export default function Dashboard() {
 
               <div className="flex items-center gap-2">
                 <Filter className="h-3.5 w-3.5 text-zinc-500" />
+                <select
+                  value={selectedFilterEnv}
+                  onChange={(e) => setSelectedFilterEnv(e.target.value)}
+                  className="bg-zinc-950 border border-zinc-800 text-xs rounded-lg px-2.5 py-1.5 text-zinc-300 focus:outline-none focus:border-indigo-500/60 font-mono transition-colors"
+                >
+                  <option value="all">All Envs</option>
+                  <option value="production">production</option>
+                  <option value="staging">staging</option>
+                  <option value="development">development</option>
+                </select>
                 <select
                   value={selectedFilterModel}
                   onChange={(e) => setSelectedFilterModel(e.target.value)}

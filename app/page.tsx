@@ -12,12 +12,11 @@ import {
   Key,
   Clock,
   Webhook,
-  Users,
   HelpCircle,
   Loader2,
 } from "lucide-react";
 
-const PLANS = [
+const getPlans = (billingCycle: "monthly" | "annual") => [
   {
     key: "free",
     name: "Free",
@@ -41,21 +40,20 @@ const PLANS = [
       rateLimit: "60 req/min",
       overage: "—",
       alerts: "—",
-      sla: "—",
-      rbac: "—",
+      support: "Community",
     },
   },
   {
     key: "pro",
     name: "Pro",
-    price: "$49",
+    price: billingCycle === "annual" ? "$79" : "$99",
     period: "/mo",
-    subtitle: "For Teams Building AI Products",
+    subtitle: billingCycle === "annual" ? "Billed annually ($948/yr) · 20% Savings" : "Billed monthly · Cancel anytime",
     highlight: true,
     badge: "Most Popular",
     cta: "Start Pro Trial",
     features: [
-      { label: "250,000 logs / month included", icon: TrendingUp },
+      { label: "500,000 logs / month included", icon: TrendingUp },
       { label: "$0.10 / 1,000 extra logs (PAYG)", icon: Zap },
       { label: "30-day data retention", icon: Clock },
       { label: "Unlimited API Keys", icon: Key },
@@ -63,43 +61,13 @@ const PLANS = [
       { label: "Webhook & Email Cost Alerts", icon: Webhook },
     ],
     limits: {
-      logs: "250,000",
+      logs: "500,000",
       retention: "30 days",
       keys: "Unlimited",
       rateLimit: "1,000 req/min",
       overage: "$0.10 / 1k logs",
       alerts: "Webhook & Email",
-      sla: "—",
-      rbac: "—",
-    },
-  },
-  {
-    key: "enterprise",
-    name: "Enterprise",
-    price: "$299",
-    period: "/mo",
-    subtitle: "Starting — Custom Pricing Available",
-    highlight: false,
-    badge: "Best Value at Scale",
-    cta: "Talk to Sales",
-    features: [
-      { label: "1,000,000+ logs / month (Volume Discounts)", icon: TrendingUp },
-      { label: "$0.05 / 1,000 extra logs (negotiated)", icon: Zap },
-      { label: "90-day to 1-year data retention", icon: Clock },
-      { label: "Unlimited API Keys", icon: Key },
-      { label: "Dedicated Uptime SLA", icon: Shield },
-      { label: "Dedicated Slack Support Channel", icon: Users },
-      { label: "Custom Webhooks & RBAC Team Roles", icon: Webhook },
-    ],
-    limits: {
-      logs: "1,000,000+",
-      retention: "90 days – 1 year",
-      keys: "Unlimited",
-      rateLimit: "Custom",
-      overage: "$0.05 / 1k logs",
-      alerts: "Custom Webhooks",
-      sla: "Dedicated SLA",
-      rbac: "Full RBAC",
+      support: "Priority Email",
     },
   },
 ];
@@ -111,34 +79,28 @@ const COMPARISON_ROWS = [
   { label: "Rate Limit", key: "rateLimit" },
   { label: "Overage Rate", key: "overage" },
   { label: "Cost Alerts", key: "alerts" },
-  { label: "Uptime SLA", key: "sla" },
-  { label: "Role-Based Access (RBAC)", key: "rbac" },
+  { label: "Support", key: "support" },
 ] as const;
 
 export default function Home() {
   const router = useRouter();
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
+  const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
+
+  const plans = getPlans(billingCycle);
 
   const handleSelectPlan = async (planKey: string) => {
-    // 3. "Talk to Sales" (Enterprise) -> Opens mailto link support@meterix.io
-    if (planKey === "enterprise") {
-      window.location.href = "mailto:support@meterix.io";
-      return;
-    }
-
-    // 2. "Start Pro Trial" ($49/mo Plan) — check auth first, then call checkout
+    // "Start Pro Trial" ($99/mo or $79/mo Plan) — check auth first, then call checkout
     if (planKey === "pro") {
       setLoadingPlan("pro");
       try {
-        // Check if user is authenticated before triggering Lemon Squeezy Checkout
         const { data: sessionData } = await supabase.auth.getSession();
         if (!sessionData.session?.user) {
-          // Unauthenticated — redirect to login with return context
-          router.push("/login?plan=pro&checkout=pending");
+          router.push(`/login?plan=pro&billing=${billingCycle}&checkout=pending`);
           return;
         }
 
-        const res = await fetch("/api/checkout?plan=pro");
+        const res = await fetch(`/api/checkout?plan=pro&billing=${billingCycle}`);
         if (res.ok) {
           const data = await res.json();
           if (data.url) {
@@ -146,16 +108,16 @@ export default function Home() {
             return;
           }
         }
-        window.location.href = "/api/checkout?plan=pro";
+        window.location.href = `/api/checkout?plan=pro&billing=${billingCycle}`;
       } catch {
-        window.location.href = "/api/checkout?plan=pro";
+        window.location.href = `/api/checkout?plan=pro&billing=${billingCycle}`;
       } finally {
         setLoadingPlan(null);
       }
       return;
     }
 
-    // 1. "Get Started" (Free Plan) -> Redirects to /dashboard (or /login)
+    // "Get Started" (Free Plan) -> Redirects to /dashboard (or /login)
     setLoadingPlan("free");
     try {
       const { data } = await supabase.auth.getSession();
@@ -228,7 +190,7 @@ export default function Home() {
       {/* ── Pricing Cards ────────────────────────────────────── */}
       <section id="pricing" className="py-12 sm:py-16 px-4 sm:px-6 py-6 w-full">
         <div className="max-w-6xl mx-auto w-full">
-          <div className="text-center mb-14">
+          <div className="text-center mb-10">
             <h2 className="text-3xl sm:text-4xl font-bold mb-4">
               Simple, Transparent Pricing
             </h2>
@@ -237,8 +199,37 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch w-full">
-            {PLANS.map((plan) => (
+          {/* Monthly / Annual Billing Toggle Switch */}
+          <div className="flex items-center justify-center gap-3 mb-10">
+            <span className={`text-xs font-mono font-medium transition-colors ${billingCycle === "monthly" ? "text-zinc-100" : "text-zinc-500"}`}>
+              Billed Monthly
+            </span>
+            <button
+              type="button"
+              onClick={() => setBillingCycle((prev) => (prev === "monthly" ? "annual" : "monthly"))}
+              className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent bg-zinc-800 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-zinc-950"
+              role="switch"
+              aria-checked={billingCycle === "annual"}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-indigo-500 shadow-lg ring-0 transition duration-200 ease-in-out ${
+                  billingCycle === "annual" ? "translate-x-5 bg-indigo-400" : "translate-x-0 bg-zinc-400"
+                }`}
+              />
+            </button>
+            <div className="flex items-center gap-1.5">
+              <span className={`text-xs font-mono font-medium transition-colors ${billingCycle === "annual" ? "text-zinc-100" : "text-zinc-500"}`}>
+                Billed Annually
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                20% SAVINGS
+              </span>
+            </div>
+          </div>
+
+          {/* Pricing Cards Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 items-stretch w-full max-w-3xl mx-auto">
+            {plans.map((plan) => (
               <div
                 key={plan.name}
                 className={`relative rounded-xl p-6 flex flex-col gap-6 border transition-all w-full ${
@@ -308,15 +299,15 @@ export default function Home() {
       </section>
 
       {/* ── Feature Comparison Grid ───────────────────────────── */}
-      <section className="py-12 sm:py-16 px-4 sm:px-6 py-6 w-full">
-        <div className="max-w-6xl mx-auto w-full">
+      <section className="py-12 sm:py-16 px-4 sm:px-6 py-6 w-full max-w-4xl mx-auto">
+        <div className="w-full">
           <h2 className="text-xl font-bold text-center mb-8 text-zinc-100">Full Feature Comparison</h2>
           <div className="w-full max-w-full overflow-x-auto rounded-2xl border border-zinc-800 bg-zinc-900/60">
             <table className="w-full text-sm text-left">
               <thead className="border-b border-zinc-800">
                 <tr>
-                  <th className="py-4 px-6 text-zinc-500 font-medium w-1/4">Feature</th>
-                  {PLANS.map((plan) => (
+                  <th className="py-4 px-6 text-zinc-500 font-medium w-1/3">Feature</th>
+                  {plans.map((plan) => (
                     <th
                       key={plan.name}
                       className={`py-4 px-6 font-bold text-center ${
@@ -332,7 +323,7 @@ export default function Home() {
                 {COMPARISON_ROWS.map(({ label, key }) => (
                   <tr key={key} className="hover:bg-zinc-800/30 transition-colors">
                     <td className="py-3.5 px-6 text-zinc-400 font-medium">{label}</td>
-                    {PLANS.map((plan) => {
+                    {plans.map((plan) => {
                       const val = plan.limits[key];
                       const isEmpty = val === "—";
                       const isBool = val === "✓";
@@ -372,15 +363,15 @@ export default function Home() {
           {[
             {
               q: "What counts as a log?",
-              a: "Each POST to /api/v1/telemetry counts as one log entry regardless of token count.",
+              a: "Each POST request to /api/v1/telemetry counts as one log entry regardless of token count.",
             },
             {
               q: "How are overages billed?",
-              a: "On Pro, each additional 1,000 logs beyond 250,000 is billed at $0.10. On Enterprise, rates are negotiated at $0.05/1k with volume discounts.",
+              a: "On Pro, each additional 1,000 logs beyond 500,000 included monthly logs is billed at $0.10 (PAYG).",
             },
             {
-              q: "Can I switch plans anytime?",
-              a: "Yes — upgrades are immediate. Downgrades take effect at the start of your next billing cycle.",
+              q: "Can I switch billing cycles or plans anytime?",
+              a: "Yes — upgrades are immediate. You can switch between monthly ($99/mo) and annual ($79/mo) billing at any time directly from your account.",
             },
             {
               q: "Do you support custom models?",
@@ -401,8 +392,37 @@ export default function Home() {
       </section>
 
       {/* ── Footer ─────────────────────────────────────────────── */}
-      <footer className="border-t border-zinc-900 py-8 text-center text-xs text-zinc-600 font-mono">
-        <p>Meterix © 2026 • LLM Telemetry Infrastructure</p>
+      <footer className="border-t border-zinc-900 bg-zinc-950 py-10 px-4 sm:px-6 font-mono text-xs text-zinc-500">
+        <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="flex items-center gap-3">
+            <span className="font-bold text-sm tracking-tight text-zinc-200 font-mono">
+              Meterix<span className="text-indigo-400">.</span>
+            </span>
+            <span className="text-zinc-800">|</span>
+            <p className="text-zinc-500 text-xs font-sans">
+              Enterprise LLM Telemetry &amp; Cost Intelligence
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-center gap-6 text-zinc-400 text-xs font-sans">
+            <Link href="/privacy" className="hover:text-zinc-200 transition-colors">
+              Privacy Policy
+            </Link>
+            <Link href="/terms" className="hover:text-zinc-200 transition-colors">
+              Terms of Service
+            </Link>
+            <Link href="/dpa" className="hover:text-zinc-200 transition-colors">
+              DPA
+            </Link>
+            <Link href="/docs" className="hover:text-zinc-200 transition-colors">
+              Documentation
+            </Link>
+          </div>
+
+          <div className="text-zinc-600 text-xs font-mono">
+            © 2026 Meterix Inc. All rights reserved.
+          </div>
+        </div>
       </footer>
     </div>
   );

@@ -273,8 +273,8 @@ export default function LoginPage() {
         </div>
 
         {/* Footer badge */}
-        <p className="mt-6 text-center text-xs text-zinc-700 font-mono">
-          Secured by Supabase Auth • Meterix v1.0.0
+        <p className="mt-6 text-center text-xs text-zinc-600 font-mono">
+          Meterix Infrastructure • v1.0.0
         </p>
       </div>
     </div>

@@ -8,10 +8,8 @@ export const dynamic = "force-dynamic";
 /** Generate a unique Meterix API key string with strictly unique secret strings & prefixes. */
 function generateApiKey(env: "live" | "test" = "live"): string {
   const prefix = env === "test" ? "mx_test_" : "mx_live_";
-  const randomBytes = crypto.randomBytes(24);
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  const randomStr = Array.from(randomBytes, (b) => chars[b % chars.length]).join("");
-  return `${prefix}${randomStr}`;
+  const randomHex = crypto.randomBytes(18).toString("hex");
+  return `${prefix}${randomHex}`;
 }
 
 // GET /api/keys — list all keys for the authenticated user

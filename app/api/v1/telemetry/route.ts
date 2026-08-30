@@ -212,6 +212,33 @@ export async function POST(req: NextRequest) {
     const pTokens = Number(prompt_tokens ?? input_tokens ?? 0);
     const cTokens = Number(completion_tokens ?? output_tokens ?? 0);
 
+    // Parse Prompt Caching fields
+    const cachedTokens = Number(
+      body.cached_tokens ??
+      body.cache_read_tokens ??
+      body.cache_read_input_tokens ??
+      metadata?.cached_tokens ??
+      metadata?.cache_read_tokens ??
+      0
+    );
+    const cacheCreationTokens = Number(
+      body.cache_creation_tokens ??
+      body.cache_creation_input_tokens ??
+      metadata?.cache_creation_tokens ??
+      0
+    );
+
+    // Parse Metadata breakdown fields
+    const envTag = String(
+      metadata?.environment ?? body.environment ?? body.env ?? "production"
+    ).toLowerCase();
+    const agentTag = String(
+      metadata?.agent_name ?? body.agent_name ?? body.agent ?? "default-agent"
+    );
+    const endUserTag = String(
+      metadata?.user_id ?? body.end_user_id ?? body.client_id ?? userId ?? "anonymous"
+    );
+
     if (!model || (prompt_tokens === undefined && input_tokens === undefined)) {
       return NextResponse.json(
         {
@@ -224,19 +251,34 @@ export async function POST(req: NextRequest) {
 
     const totalTokens = pTokens + cTokens;
 
-    // 4. Cost calculation & is_estimated logic
+    // 4. Cost calculation with Prompt Caching discounts & is_estimated logic
     const modelKey = String(model).toLowerCase().trim();
     const pricing = MODEL_PRICING[modelKey];
 
     let roundedCost = 0;
+    let cacheSavingsUSD = 0;
     let isEstimated = false;
     let provider = body.provider || "custom";
 
     if (pricing) {
       provider = pricing.provider;
-      const calculatedCost =
-        pTokens * pricing.input_cost_per_token + cTokens * pricing.output_cost_per_token;
+      // Prompt Caching multiplier: 0.10x for Anthropic (90% off), 0.50x for OpenAI/Gemini (50% off)
+      const cacheReadMultiplier = provider === "anthropic" ? 0.10 : 0.50;
+      const validCachedTokens = Math.min(pTokens, Math.max(0, cachedTokens));
+      const uncachedInputTokens = Math.max(0, pTokens - validCachedTokens);
+
+      const uncachedInputCost = uncachedInputTokens * pricing.input_cost_per_token;
+      const cacheReadCost = validCachedTokens * pricing.input_cost_per_token * cacheReadMultiplier;
+      const cacheCreationCost = cacheCreationTokens * pricing.input_cost_per_token * 1.25;
+      const outputCost = cTokens * pricing.output_cost_per_token;
+
+      const calculatedCost = uncachedInputCost + cacheReadCost + cacheCreationCost + outputCost;
       roundedCost = Number(calculatedCost.toFixed(6));
+
+      // Calculate USD saved via prompt caching
+      cacheSavingsUSD = Number(
+        (validCachedTokens * pricing.input_cost_per_token * (1 - cacheReadMultiplier)).toFixed(6)
+      );
       isEstimated = false;
     } else {
       // Unknown or custom model
@@ -252,13 +294,19 @@ export async function POST(req: NextRequest) {
 
     const nowIso = new Date().toISOString();
 
-    // 5. Construct log payload explicitly including user_id for DB schema
+    // 5. Construct log payload explicitly including user_id & metadata for DB schema
     const logPayload = {
       user_id: userId,
       provider: provider,
       model: modelKey,
       input_tokens: pTokens,
       output_tokens: cTokens,
+      cached_tokens: cachedTokens,
+      cache_creation_tokens: cacheCreationTokens,
+      environment: envTag,
+      agent_name: agentTag,
+      end_user_id: endUserTag,
+      metadata: metadata || { environment: envTag, agent_name: agentTag },
       total_cost_usd: roundedCost,
       latency_ms: Number(body.latency_ms || body.latency) || 100,
       status_code: 200,
@@ -311,9 +359,14 @@ export async function POST(req: NextRequest) {
         model: modelKey,
         prompt_tokens: pTokens,
         completion_tokens: cTokens,
+        cached_tokens: cachedTokens,
+        cache_creation_tokens: cacheCreationTokens,
         total_tokens: totalTokens,
         calculated_cost: roundedCost,
+        cache_savings_usd: cacheSavingsUSD,
         is_estimated: isEstimated,
+        environment: envTag,
+        agent_name: agentTag,
         currency: "USD",
         timestamp: nowIso,
       },
