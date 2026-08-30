@@ -291,7 +291,7 @@ export default function Home() {
                       <span
                         className={`mt-0.5 p-1 rounded-md shrink-0 ${
                           plan.highlight
-                            ? "bg-emerald-950/70 text-emerald-400 border border-emerald-900/60"
+                            ? "bg-indigo-950/80 text-indigo-400 border border-indigo-800/60"
                             : "bg-zinc-800 text-zinc-400 border border-zinc-700/40"
                         }`}
                       >
@@ -320,7 +320,7 @@ export default function Home() {
                     <th
                       key={plan.name}
                       className={`py-4 px-6 font-bold text-center ${
-                        plan.highlight ? "text-emerald-400" : "text-zinc-200"
+                        plan.highlight ? "text-indigo-400" : "text-zinc-200"
                       }`}
                     >
                       {plan.name}
@@ -343,14 +343,14 @@ export default function Home() {
                             isEmpty
                               ? "text-zinc-700"
                               : plan.highlight
-                              ? "text-emerald-300 font-semibold"
+                              ? "text-indigo-300 font-semibold"
                               : "text-zinc-300"
                           }`}
                         >
                           {isEmpty ? (
                             <span className="text-zinc-700">—</span>
                           ) : isBool ? (
-                            <Check className="h-4 w-4 text-emerald-400 mx-auto" />
+                            <Check className="h-4 w-4 text-indigo-400 mx-auto" />
                           ) : (
                             val
                           )}
@@ -389,7 +389,7 @@ export default function Home() {
           ].map(({ q, a }) => (
             <div key={q} className="rounded-xl bg-zinc-900/60 border border-zinc-800 p-5">
               <div className="flex gap-3">
-                <HelpCircle className="h-4 w-4 text-emerald-400 mt-0.5 shrink-0" />
+                <HelpCircle className="h-4 w-4 text-indigo-400 mt-0.5 shrink-0" />
                 <div>
                   <p className="text-sm font-semibold text-zinc-100 mb-1">{q}</p>
                   <p className="text-xs text-zinc-400 leading-relaxed">{a}</p>

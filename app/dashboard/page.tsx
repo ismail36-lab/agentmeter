@@ -26,6 +26,7 @@ import {
   Trash2,
   Loader2,
   AlertCircle,
+  AlertTriangle,
   Eye,
   EyeOff,
   TrendingUp,
@@ -487,7 +488,7 @@ export default function Dashboard() {
   const isGlobalLoading = isLoadingLogs || isLoadingMetrics;
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-50 flex flex-col font-sans selection:bg-emerald-500/20 w-full max-w-full overflow-x-hidden">
+    <div className="min-h-screen bg-[#09090b] text-zinc-50 flex flex-col font-sans selection:bg-indigo-500/20 w-full max-w-full overflow-x-hidden">
 
       {/* ── Navbar ─────────────────────────────────────────────── */}
       <header className="sticky top-0 z-50 border-b border-zinc-800/80 bg-[#09090b]/80 backdrop-blur-md">
@@ -511,7 +512,7 @@ export default function Dashboard() {
           {/* Right controls */}
           <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 animate-pulse" />
               <span className="font-mono">Ingestion API Active</span>
             </div>
 
@@ -583,7 +584,7 @@ export default function Dashboard() {
             </h1>
             <p className="text-sm text-zinc-400 mt-1 max-w-2xl">
               Real-time usage metering, token tracking, and precise cost calculation for{" "}
-              <code className="text-emerald-400 bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-900/60 font-mono text-xs">
+              <code className="text-indigo-400 bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-900/60 font-mono text-xs">
                 gpt-4o
               </code>
               ,{" "}
@@ -609,7 +610,7 @@ export default function Dashboard() {
         <div className="bento-card p-6 space-y-4">
           <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="p-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-emerald-400 shrink-0">
+              <div className="p-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-indigo-400 shrink-0">
                 <TrendingUp className="h-5 w-5" />
               </div>
               <div>
@@ -620,7 +621,7 @@ export default function Dashboard() {
                   <span
                     className={`px-2.5 py-0.5 rounded text-[10px] font-bold font-mono border ${
                       planDetails.plan === "pro"
-                        ? "bg-emerald-950/80 text-emerald-400 border-emerald-800/60"
+                        ? "bg-indigo-950/80 text-indigo-400 border-indigo-800/60"
                         : planDetails.plan === "enterprise"
                         ? "bg-violet-950/80 text-violet-400 border-violet-800/60"
                         : "bg-zinc-800 text-zinc-400 border-zinc-700/60"
@@ -653,7 +654,7 @@ export default function Dashboard() {
                     id="manage-subscription-btn"
                     onClick={handleManageBilling}
                     disabled={isLoadingPortal}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-emerald-950/30 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-900/40 transition-all"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-sm"
                     title="Open Lemon Squeezy Customer Portal"
                   >
                     {isLoadingPortal ? (
@@ -667,27 +668,25 @@ export default function Dashboard() {
                   <button
                     onClick={handleTogglePlan}
                     disabled={isSwitchingPlan}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-300 border border-zinc-700/60 transition-all"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-300 border border-zinc-700/60 transition-all"
                   >
                     {isSwitchingPlan && <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />}
                     Switch to Free Sandbox
                   </button>
                 </>
               ) : (
-                <>
-                  <button
-                    onClick={handleTogglePlan}
-                    disabled={isSwitchingPlan}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-emerald-950/30 border border-emerald-500/40 text-emerald-400 hover:bg-emerald-900/40 transition-all"
-                  >
-                    {isSwitchingPlan ? (
-                      <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
-                    ) : (
-                      <Zap className="h-4 w-4 flex-shrink-0" />
-                    )}
-                    Upgrade to Pro ($49/mo)
-                  </button>
-                </>
+                <button
+                  onClick={handleTogglePlan}
+                  disabled={isSwitchingPlan}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-sm"
+                >
+                  {isSwitchingPlan ? (
+                    <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                  ) : (
+                    <Zap className="h-4 w-4 flex-shrink-0" />
+                  )}
+                  Upgrade to Pro ($49/mo)
+                </button>
               )}
             </div>
           </div>
@@ -695,16 +694,35 @@ export default function Dashboard() {
           {/* Progress Bar */}
           <div className="w-full bg-zinc-900 rounded-full h-2.5 overflow-hidden border border-zinc-800/80">
             <div
-              className={`h-full transition-all duration-500 rounded-full ${
+              className={`h-full rounded-full transition-all duration-500 ${
                 planDetails.percentage >= 90
                   ? "bg-rose-500"
-                  : planDetails.percentage >= 70
-                  ? "bg-amber-400"
-                  : "bg-emerald-400"
+                  : planDetails.percentage >= 75
+                  ? "bg-amber-500"
+                  : "bg-indigo-500"
               }`}
-              style={{ width: `${Math.max(2, planDetails.percentage)}%` }}
+              style={{ width: `${Math.min(planDetails.percentage, 100)}%` }}
             />
           </div>
+
+          {planDetails.percentage >= 80 && (
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 rounded-xl bg-amber-950/40 border border-amber-800/60 text-xs">
+              <div className="flex items-center gap-2 text-amber-300">
+                <AlertTriangle className="h-4 w-4 shrink-0" />
+                <span>
+                  You have used <strong>{planDetails.percentage}%</strong> of your monthly log quota limit ({planDetails.usage.toLocaleString()} / {planDetails.limit.toLocaleString()}). Upgrade now to prevent API rejection.
+                </span>
+              </div>
+              <button
+                onClick={handleTogglePlan}
+                disabled={isSwitchingPlan}
+                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors shadow-sm"
+              >
+                {isSwitchingPlan ? <Loader2 className="h-3.5 w-3.5 animate-spin inline" /> : <Zap className="h-3.5 w-3.5" />}
+                <span>Upgrade Plan</span>
+              </button>
+            </div>
+          )}
 
           {/* Limit-reached banner — only visible to free users at 100% */}
           {planDetails.plan === "free" && planDetails.percentage >= 100 && (
@@ -722,7 +740,7 @@ export default function Dashboard() {
               <a
                 href="/api/checkout?plan=pro"
                 id="upgrade-to-pro-banner-btn"
-                className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-bold transition-colors"
+                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors shadow-sm"
               >
                 <Zap className="h-3.5 w-3.5" />
                 Upgrade to Pro
@@ -931,7 +949,7 @@ export default function Dashboard() {
               <div className="p-3 rounded-lg bg-[#0c0d0e] border border-zinc-800 text-[11px] font-mono space-y-1 w-full">
                 <div className="flex items-center justify-between text-zinc-500">
                   <span>API Response:</span>
-                  <span className={testResult.success ? "text-emerald-400" : "text-rose-400"}>
+                  <span className={testResult.success ? "text-indigo-400" : "text-rose-400"}>
                     {testResult.success ? "200 OK" : "Error"}
                   </span>
                 </div>
@@ -989,7 +1007,7 @@ export default function Dashboard() {
                   {isLoadingLogs ? (
                     <tr>
                       <td colSpan={6} className="py-6 text-center text-zinc-500">
-                        <Loader2 className="h-4 w-4 animate-spin inline mr-2 text-emerald-400" />
+                        <Loader2 className="h-4 w-4 animate-spin inline mr-2 text-indigo-400" />
                         Loading telemetry logs…
                       </td>
                     </tr>

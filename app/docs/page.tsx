@@ -107,7 +107,7 @@ runAgent();`;
 }`;
 
   return (
-    <div className="min-h-screen bg-[#09090b] text-zinc-50 flex flex-col font-sans selection:bg-emerald-500/20 w-full max-w-full overflow-x-hidden">
+    <div className="min-h-screen bg-[#09090b] text-zinc-50 flex flex-col font-sans selection:bg-indigo-500/20 w-full max-w-full overflow-x-hidden">
 
       {/* ── Navbar ─────────────────────────────────────────────── */}
       <header className="sticky top-0 z-50 border-b border-zinc-800/80 bg-[#09090b]/80 backdrop-blur-md">
@@ -131,7 +131,7 @@ runAgent();`;
               href="/dashboard"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-300 hover:text-zinc-50 transition-colors"
             >
-              <ArrowLeft className="h-3.5 w-3.5 text-emerald-400" />
+              <ArrowLeft className="h-3.5 w-3.5 text-indigo-400" />
               <span>Back to Dashboard</span>
             </Link>
           </div>
@@ -160,9 +160,9 @@ runAgent();`;
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
           <a
             href="#python-sdk"
-            className="bento-card p-4 hover:border-emerald-500/50 transition-all group flex items-center gap-3 w-full"
+            className="bento-card p-4 hover:border-indigo-500/50 transition-all group flex items-center gap-3 w-full"
           >
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:scale-105 transition-transform">
+            <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 group-hover:scale-105 transition-transform">
               <FileCode className="h-5 w-5" />
             </div>
             <div>
@@ -422,8 +422,8 @@ runAgent();`;
 
           {/* Status Codes Notice */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2 w-full">
-            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs w-full">
-              <div className="font-bold font-mono text-emerald-400">200 Success</div>
+            <div className="p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs w-full">
+              <div className="font-bold font-mono text-indigo-400">200 Success</div>
               <p className="text-[11px] text-zinc-400 mt-1">Payload validated, cost calculated, and log stored in Supabase.</p>
             </div>
             <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs w-full">

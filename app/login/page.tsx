@@ -106,15 +106,12 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center px-4 py-6 selection:bg-emerald-500/20 w-full max-w-full overflow-x-hidden">
+    <div className="min-h-screen bg-[#090d16] flex flex-col items-center justify-center px-4 py-6 selection:bg-indigo-500/20 w-full max-w-full overflow-x-hidden">
 
-      {/* Background decorative glow */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none fixed inset-0 overflow-hidden"
-      >
-        <div className="absolute -top-40 left-1/2 -translate-x-1/2 h-96 w-96 rounded-full bg-emerald-500/5 blur-3xl" />
-        <div className="absolute bottom-0 right-0 h-72 w-72 rounded-full bg-violet-500/5 blur-3xl" />
+      {/* Glow background */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-40 left-1/2 -translate-x-1/2 h-96 w-96 rounded-full bg-indigo-500/5 blur-3xl" />
+        <div className="absolute bottom-0 right-0 h-72 w-72 rounded-full bg-indigo-500/5 blur-3xl" />
       </div>
 
       {/* Card */}
@@ -223,7 +220,7 @@ export default function LoginPage() {
 
             {/* Success */}
             {successMsg && (
-              <div className="flex items-start gap-2.5 p-3 rounded-xl bg-emerald-500/8 border border-emerald-500/20 text-emerald-400 text-sm">
+              <div className="flex items-start gap-2.5 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-sm">
                 <ShieldCheck className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>{successMsg}</span>
               </div>

@@ -143,7 +143,7 @@ export function ApiKeyManagement({
             {isLoading ? (
               <tr>
                 <td colSpan={5} className="py-8 text-center text-zinc-500">
-                  <Loader2 className="h-4 w-4 animate-spin inline mr-2 text-emerald-400" />
+                  <Loader2 className="h-4 w-4 animate-spin inline mr-2 text-indigo-400" />
                   Fetching API keys from Supabase...
                 </td>
               </tr>
@@ -188,8 +188,8 @@ export function ApiKeyManagement({
                     </td>
                     <td className="py-3.5 px-4">
                       {item.is_active ? (
-                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                          <span className="h-1.5 w-1.5 rounded-full bg-indigo-400" />
                           Active
                         </span>
                       ) : (
@@ -207,7 +207,7 @@ export function ApiKeyManagement({
                           title="Copy Key"
                         >
                           {copiedId === item.id ? (
-                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                            <CheckCircle2 className="h-3.5 w-3.5 text-indigo-400" />
                           ) : (
                             <Copy className="h-3.5 w-3.5" />
                           )}
