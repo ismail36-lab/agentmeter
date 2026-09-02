@@ -50,23 +50,11 @@ export function ModelDistributionChart({ data, totalSpend }: ModelDistributionCh
   const calculatedTotal = chartData.reduce((acc, curr) => acc + curr.value, 0);
   const displayTotal = totalSpend !== undefined && totalSpend > 0 ? totalSpend : calculatedTotal;
 
-  // Multi-model breakdown split for active or fallback data
+  // Multi-model breakdown split for active data or clean empty state
   const isPlaceholder = chartData.length === 0;
   const renderData = isPlaceholder
-    ? [
-        { name: "gpt-4o",            value: 55, color: "#6366f1" },
-        { name: "claude-3-5-sonnet", value: 30, color: "#f97316" },
-        { name: "gemini-1.5-pro",    value: 15, color: "#3b82f6" },
-      ]
+    ? [{ name: "No Activity", value: 1, color: "#27272a" }]
     : chartData;
-
-  const legendItems = !isPlaceholder
-    ? chartData
-    : [
-        { name: "gpt-4o",            color: "#6366f1" },
-        { name: "claude-3-5-sonnet", color: "#f97316" },
-        { name: "gemini-1.5-pro",    color: "#3b82f6" },
-      ];
 
   return (
     <div className="bento-card bento-card-hover flex flex-col border border-zinc-800/80 bg-zinc-900/90 overflow-hidden">
@@ -124,7 +112,7 @@ export function ModelDistributionChart({ data, totalSpend }: ModelDistributionCh
           </PieChart>
         </ResponsiveContainer>
 
-        {/* Center Donut Absolute Overlay Label — accurately centered in the 210px donut ring */}
+        {/* Center Donut Absolute Overlay Label */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
           <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-500">Total</span>
           <span className="text-sm font-bold font-mono text-zinc-100">${displayTotal.toFixed(4)}</span>
@@ -133,22 +121,26 @@ export function ModelDistributionChart({ data, totalSpend }: ModelDistributionCh
 
       {/* Legend Container */}
       <div className="px-5 pt-3 pb-4 border-t border-zinc-800/80 shrink-0">
-        <div className="flex flex-col gap-2">
-          {legendItems.map((item) => (
-            <div key={item.name} className="flex items-center gap-2 text-xs text-zinc-400 font-mono min-w-0">
-              <span
-                className="h-2 w-2 rounded-full shrink-0"
-                style={{ backgroundColor: item.color || DEFAULT_COLORS[item.name] || DEFAULT_COLORS.other }}
-              />
-              <span className="truncate">{item.name}</span>
-              {!isPlaceholder && "value" in item && (
+        {isPlaceholder ? (
+          <div className="text-center text-xs text-zinc-500 font-mono py-1">
+            No activity logs recorded yet
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {chartData.map((item) => (
+              <div key={item.name} className="flex items-center gap-2 text-xs text-zinc-400 font-mono min-w-0">
+                <span
+                  className="h-2 w-2 rounded-full shrink-0"
+                  style={{ backgroundColor: item.color || DEFAULT_COLORS[item.name] || DEFAULT_COLORS.other }}
+                />
+                <span className="truncate">{item.name}</span>
                 <span className="ml-auto font-semibold text-zinc-300 shrink-0 pl-2">
-                  ${Number((item as ModelBreakdownItem).value).toFixed(4)}
+                  ${Number(item.value).toFixed(4)}
                 </span>
-              )}
-            </div>
-          ))}
-        </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

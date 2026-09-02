@@ -65,71 +65,28 @@ export async function GET(req: NextRequest) {
 
     const userLogs = logs || [];
 
-    // Fallback: If user has 0 logs, seed realistic mock demo metrics, caching stats, environment & agent breakdown
+    // When user has 0 logs, return clean zero/empty metrics
     if (userLogs.length === 0) {
-      const demoSpend = 14.8250;
-      const demoTokens = 1284500;
-      const demoRequests = 342;
-      const demoTopModel = "gpt-4o";
-
-      const demoModelBreakdown = [
-        { name: "gpt-4o", value: 8.4500, color: "#6366f1" },
-        { name: "claude-3-5-sonnet", value: 4.8250, color: "#f97316" },
-        { name: "gemini-1.5-pro", value: 1.5500, color: "#3b82f6" },
-      ];
-
-      const demoEnvironmentBreakdown = [
-        { name: "production", spend: 11.2400, requests: 245, percentage: 75.8 },
-        { name: "staging", spend: 2.8500, requests: 68, percentage: 19.2 },
-        { name: "development", spend: 0.7350, requests: 29, percentage: 5.0 },
-      ];
-
-      const demoAgentBreakdown = [
-        { name: "customer-support-bot", spend: 6.8400, requests: 142, model: "gpt-4o", top_model: "gpt-4o", distinct_models: 3, extra_models_count: 2 },
-        { name: "code-review-assistant", spend: 4.8250, requests: 98, model: "claude-3-5-sonnet", top_model: "claude-3-5-sonnet", distinct_models: 1, extra_models_count: 0 },
-        { name: "doc-summarizer", spend: 2.4250, requests: 74, model: "gemini-1.5-pro", top_model: "gemini-1.5-pro", distinct_models: 2, extra_models_count: 1 },
-        { name: "triage-router", spend: 0.7350, requests: 28, model: "gpt-4o-mini", top_model: "gpt-4o-mini", distinct_models: 1, extra_models_count: 0 },
-      ];
-
-      const demoCachingMetrics = {
-        totalCachedTokens: 412500,
-        cacheHitRate: 32.1,
-        totalSavingsUSD: 3.7125,
-      };
-
-      const demoTrend = [];
-      const now = new Date();
-      for (let i = 29; i >= 0; i--) {
-        const d = new Date(now);
-        d.setDate(d.getDate() - i);
-        const label = d.toLocaleDateString("en-US", { month: "short", day: "2-digit" });
-        const baseSpend = 0.25 + Math.sin(i * 0.4) * 0.15 + (i % 7 === 0 ? 0.35 : 0.05);
-        const spendVal = Number(baseSpend.toFixed(4));
-        const tokensVal = Math.round(spendVal * 85000);
-        demoTrend.push({
-          date: label,
-          cost: spendVal,
-          spend: spendVal,
-          tokens: tokensVal,
-        });
-      }
-
       return NextResponse.json(
         {
-          is_demo: true,
+          is_demo: false,
           metrics: {
-            totalSpend: demoSpend,
-            totalTokens: demoTokens,
-            totalRequests: demoRequests,
-            topModel: demoTopModel,
+            totalSpend: 0,
+            totalTokens: 0,
+            totalRequests: 0,
+            topModel: "N/A",
           },
-          cachingMetrics: demoCachingMetrics,
-          environmentBreakdown: demoEnvironmentBreakdown,
-          agentBreakdown: demoAgentBreakdown,
-          dailyTrend: demoTrend,
-          daily_trends: demoTrend,
-          modelBreakdown: demoModelBreakdown,
-          model_breakdown: demoModelBreakdown,
+          cachingMetrics: {
+            totalCachedTokens: 0,
+            cacheHitRate: 0,
+            totalSavingsUSD: 0,
+          },
+          environmentBreakdown: [],
+          agentBreakdown: [],
+          dailyTrend: [],
+          daily_trends: [],
+          modelBreakdown: [],
+          model_breakdown: [],
         },
         { headers: NO_CACHE_HEADERS }
       );

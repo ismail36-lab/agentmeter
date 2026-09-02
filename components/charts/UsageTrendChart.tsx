@@ -77,7 +77,7 @@ export function UsageTrendChart({ data }: UsageTrendChartProps) {
       <div className="w-full flex-1 min-h-[220px]">
         {formattedData.length === 0 ? (
           <div className="h-full flex items-center justify-center text-xs text-zinc-500 font-mono">
-            No historical trend data available yet
+            No activity logs recorded yet
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">

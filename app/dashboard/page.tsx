@@ -945,40 +945,46 @@ export default function Dashboard() {
               </p>
             </div>
             <div className="space-y-3 font-mono text-xs">
-              {environmentBreakdown.map((env) => (
-                <div key={env.name} className="space-y-1">
-                  <div className="flex items-center justify-between text-zinc-300">
-                    <span className="capitalize font-medium flex items-center gap-2">
-                      <span
-                        className={`h-2 w-2 rounded-full ${
+              {environmentBreakdown.length === 0 ? (
+                <div className="py-6 text-center text-xs text-zinc-500 font-mono">
+                  No activity logs recorded yet
+                </div>
+              ) : (
+                environmentBreakdown.map((env) => (
+                  <div key={env.name} className="space-y-1">
+                    <div className="flex items-center justify-between text-zinc-300">
+                      <span className="capitalize font-medium flex items-center gap-2">
+                        <span
+                          className={`h-2 w-2 rounded-full ${
+                            env.name === "production"
+                              ? "bg-indigo-400"
+                              : env.name === "staging"
+                              ? "bg-sky-400"
+                              : "bg-zinc-500"
+                          }`}
+                        />
+                        {env.name}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-zinc-500 font-sans">{env.requests} reqs</span>
+                        <span className="font-semibold text-zinc-100">${env.spend.toFixed(4)} ({env.percentage}%)</span>
+                      </div>
+                    </div>
+                    <div className="w-full bg-zinc-950 rounded-full h-1.5 overflow-hidden border border-zinc-800/60">
+                      <div
+                        className={`h-full rounded-full transition-all ${
                           env.name === "production"
-                            ? "bg-indigo-400"
+                            ? "bg-indigo-500"
                             : env.name === "staging"
-                            ? "bg-sky-400"
-                            : "bg-zinc-500"
+                            ? "bg-sky-500"
+                            : "bg-zinc-600"
                         }`}
+                        style={{ width: `${Math.min(env.percentage, 100)}%` }}
                       />
-                      {env.name}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-zinc-500 font-sans">{env.requests} reqs</span>
-                      <span className="font-semibold text-zinc-100">${env.spend.toFixed(4)} ({env.percentage}%)</span>
                     </div>
                   </div>
-                  <div className="w-full bg-zinc-950 rounded-full h-1.5 overflow-hidden border border-zinc-800/60">
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        env.name === "production"
-                          ? "bg-indigo-500"
-                          : env.name === "staging"
-                          ? "bg-sky-500"
-                          : "bg-zinc-600"
-                      }`}
-                      style={{ width: `${Math.min(env.percentage, 100)}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
+                ))
+              )}
             </div>
           </div>
 
@@ -997,36 +1003,42 @@ export default function Dashboard() {
               </p>
             </div>
             <div className="space-y-2.5 font-mono text-xs">
-              {agentBreakdown.map((agent) => {
-                const topModelName = agent.top_model || agent.model || "gpt-4o";
-                const distinctCount = agent.distinct_models ?? 1;
-                const extraCount = agent.extra_models_count ?? (distinctCount > 1 ? distinctCount - 1 : 0);
+              {agentBreakdown.length === 0 ? (
+                <div className="py-6 text-center text-xs text-zinc-500 font-mono">
+                  No activity logs recorded yet
+                </div>
+              ) : (
+                agentBreakdown.map((agent) => {
+                  const topModelName = agent.top_model || agent.model || "gpt-4o";
+                  const distinctCount = agent.distinct_models ?? 1;
+                  const extraCount = agent.extra_models_count ?? (distinctCount > 1 ? distinctCount - 1 : 0);
 
-                return (
-                  <div
-                    key={agent.name}
-                    className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800/60 text-zinc-300"
-                  >
-                    <div className="min-w-0 pr-2">
-                      <p className="font-semibold text-zinc-200 truncate">{agent.name}</p>
-                      <div className="flex items-center gap-1.5 mt-0.5 font-sans">
-                        <span className="text-[11px] text-zinc-400 font-mono bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded">
-                          {topModelName}
-                        </span>
-                        {extraCount > 0 && (
-                          <span className="text-[10px] font-semibold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.5 rounded-full">
-                            +{extraCount} more
+                  return (
+                    <div
+                      key={agent.name}
+                      className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800/60 text-zinc-300"
+                    >
+                      <div className="min-w-0 pr-2">
+                        <p className="font-semibold text-zinc-200 truncate">{agent.name}</p>
+                        <div className="flex items-center gap-1.5 mt-0.5 font-sans">
+                          <span className="text-[11px] text-zinc-400 font-mono bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded">
+                            {topModelName}
                           </span>
-                        )}
-                        <span className="text-[10px] text-zinc-500">• {agent.requests} requests</span>
+                          {extraCount > 0 && (
+                            <span className="text-[10px] font-semibold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.5 rounded-full">
+                              +{extraCount} more
+                            </span>
+                          )}
+                          <span className="text-[10px] text-zinc-500">• {agent.requests} requests</span>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0 font-mono">
+                        <span className="font-bold text-indigo-400">${agent.spend.toFixed(4)}</span>
                       </div>
                     </div>
-                    <div className="text-right shrink-0 font-mono">
-                      <span className="font-bold text-indigo-400">${agent.spend.toFixed(4)}</span>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
