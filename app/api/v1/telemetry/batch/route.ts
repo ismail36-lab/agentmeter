@@ -30,13 +30,13 @@ export async function OPTIONS() {
 // ── Auth helper: shared with single-event telemetry ──────────────────────────
 async function resolveApiKey(
   apiKey: string
-): Promise<{ userId: string | null; error?: string }> {
+): Promise<{ userId: string | null; apiKeyRecord: any | null; error?: string }> {
   const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
 
   // Primary: hash lookup
   const { data: hashData } = await supabaseAdmin
     .from("api_keys")
-    .select("id, user_id, is_active, status")
+    .select("id, user_id, is_active, status, budget_cap_usd, current_period_spend_usd, budget_action")
     .eq("key_hash", keyHash)
     .maybeSingle();
 
@@ -46,18 +46,18 @@ async function resolveApiKey(
     // Fallback: raw key (legacy am_ keys)
     const { data: legacyData } = await supabaseAdmin
       .from("api_keys")
-      .select("id, user_id, is_active, status")
+      .select("id, user_id, is_active, status, budget_cap_usd, current_period_spend_usd, budget_action")
       .eq("key", apiKey)
       .maybeSingle();
     data = legacyData;
   }
 
-  if (!data) return { userId: null, error: "Unauthorized: Invalid or inactive API Key" };
+  if (!data) return { userId: null, apiKeyRecord: null, error: "Unauthorized: Invalid or inactive API Key" };
 
   const isActive = data.is_active !== false && data.status !== "inactive";
-  if (!isActive) return { userId: null, error: "Unauthorized: API Key is inactive" };
+  if (!isActive) return { userId: null, apiKeyRecord: null, error: "Unauthorized: API Key is inactive" };
 
-  return { userId: data.user_id ?? null };
+  return { userId: data.user_id ?? null, apiKeyRecord: data };
 }
 
 // ── Quota helper ──────────────────────────────────────────────────────────────
@@ -329,7 +329,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Validate API key once for the entire batch
-    const { userId, error: authError } = await resolveApiKey(apiKey);
+    const { userId, apiKeyRecord, error: authError } = await resolveApiKey(apiKey);
     if (authError) {
       return NextResponse.json({ error: authError }, { status: 401, headers: getCorsHeaders() });
     }
@@ -373,6 +373,50 @@ export async function POST(req: NextRequest) {
 
     const processed = results.filter((r) => r.success).length;
     const failed = results.filter((r) => !r.success).length;
+    const totalBatchSpend = results.reduce((acc, r) => acc + (r.calculated_cost ?? 0), 0);
+
+    // 5b. Circuit Breaker Spend Check on api_keys for batch
+    let budgetWarning: string | undefined;
+
+    if (apiKeyRecord?.id) {
+      const budgetCap = apiKeyRecord.budget_cap_usd !== null && apiKeyRecord.budget_cap_usd !== undefined
+        ? Number(apiKeyRecord.budget_cap_usd)
+        : null;
+      const currentSpend = Number(apiKeyRecord.current_period_spend_usd ?? 0);
+      const action = String(apiKeyRecord.budget_action || "block_new_logs").toLowerCase();
+      const newSpend = Number((currentSpend + totalBatchSpend).toFixed(6));
+
+      if (budgetCap !== null && budgetCap > 0 && newSpend > budgetCap) {
+        if (action === "revoke_key") {
+          await supabaseAdmin
+            .from("api_keys")
+            .update({ is_active: false, status: "suspended" })
+            .eq("id", apiKeyRecord.id);
+
+          return NextResponse.json(
+            { error: "Budget cap exceeded: API key has been suspended", action: "revoke_key" },
+            { status: 403, headers: getCorsHeaders() }
+          );
+        } else if (action === "alert_only") {
+          budgetWarning = "Budget cap exceeded for this API key";
+          await supabaseAdmin
+            .from("api_keys")
+            .update({ current_period_spend_usd: newSpend })
+            .eq("id", apiKeyRecord.id);
+        } else {
+          // Default: 'block_new_logs'
+          return NextResponse.json(
+            { error: "Budget cap exceeded", action: "block_new_logs" },
+            { status: 402, headers: getCorsHeaders() }
+          );
+        }
+      } else {
+        await supabaseAdmin
+          .from("api_keys")
+          .update({ current_period_spend_usd: newSpend })
+          .eq("id", apiKeyRecord.id);
+      }
+    }
 
     // 6. Return partial-success response
     return NextResponse.json(
@@ -381,6 +425,7 @@ export async function POST(req: NextRequest) {
         processed,
         failed,
         total: events.length,
+        ...(budgetWarning && { budget_warning: budgetWarning }),
         results,
       },
       { status: 200, headers: getCorsHeaders() }

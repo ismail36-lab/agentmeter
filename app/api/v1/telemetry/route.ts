@@ -48,14 +48,23 @@ export async function POST(req: NextRequest) {
     // 2. Hash the raw token with SHA-256 and validate against `api_keys.key_hash` (with fallback for legacy keys)
     const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
 
-    let apiKeyRecord: { id?: string; name?: string; user_id?: string; is_active?: boolean } | null = null;
+    let apiKeyRecord: {
+      id?: string;
+      name?: string;
+      user_id?: string;
+      is_active?: boolean;
+      status?: string;
+      budget_cap_usd?: number | null;
+      current_period_spend_usd?: number | null;
+      budget_action?: string | null;
+    } | null = null;
     let userId: string | null = null;
 
     try {
       // Primary lookup: search by SHA-256 key_hash
       const { data: hashData, error: hashError } = await supabaseAdmin
         .from("api_keys")
-        .select("id, name, user_id, is_active, status")
+        .select("id, name, user_id, is_active, status, budget_cap_usd, current_period_spend_usd, budget_action")
         .eq("key_hash", keyHash)
         .maybeSingle();
 
@@ -65,7 +74,7 @@ export async function POST(req: NextRequest) {
         // Secondary fallback lookup: search by raw key column for legacy am_ keys or unhashed keys
         const { data: legacyData, error: legacyError } = await supabaseAdmin
           .from("api_keys")
-          .select("id, name, user_id, is_active, status")
+          .select("id, name, user_id, is_active, status, budget_cap_usd, current_period_spend_usd, budget_action")
           .eq("key", apiKey)
           .maybeSingle();
 
@@ -342,6 +351,52 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // 4b. Circuit Breaker Spend Check on api_keys
+    let budgetWarning: string | undefined;
+
+    if (apiKeyRecord?.id) {
+      const budgetCap = apiKeyRecord.budget_cap_usd !== null && apiKeyRecord.budget_cap_usd !== undefined
+        ? Number(apiKeyRecord.budget_cap_usd)
+        : null;
+      const currentSpend = Number(apiKeyRecord.current_period_spend_usd ?? 0);
+      const action = String(apiKeyRecord.budget_action || "block_new_logs").toLowerCase();
+      const newSpend = Number((currentSpend + roundedCost).toFixed(6));
+
+      if (budgetCap !== null && budgetCap > 0 && newSpend > budgetCap) {
+        if (action === "revoke_key") {
+          // Suspend API key instantly
+          await supabaseAdmin
+            .from("api_keys")
+            .update({ is_active: false, status: "suspended" })
+            .eq("id", apiKeyRecord.id);
+
+          return NextResponse.json(
+            { error: "Budget cap exceeded: API key has been suspended", action: "revoke_key" },
+            { status: 403, headers: getCorsHeaders() }
+          );
+        } else if (action === "alert_only") {
+          budgetWarning = "Budget cap exceeded for this API key";
+          // Update current_period_spend_usd normally
+          await supabaseAdmin
+            .from("api_keys")
+            .update({ current_period_spend_usd: newSpend })
+            .eq("id", apiKeyRecord.id);
+        } else {
+          // Default: 'block_new_logs'
+          return NextResponse.json(
+            { error: "Budget cap exceeded", action: "block_new_logs" },
+            { status: 402, headers: getCorsHeaders() }
+          );
+        }
+      } else {
+        // Within budget cap: update current_period_spend_usd
+        await supabaseAdmin
+          .from("api_keys")
+          .update({ current_period_spend_usd: newSpend })
+          .eq("id", apiKeyRecord.id);
+      }
+    }
+
     const nowIso = new Date().toISOString();
 
     // 5. Construct log payload — agent_name defaults to 'default-agent' if not supplied
@@ -418,6 +473,7 @@ export async function POST(req: NextRequest) {
         is_estimated: isEstimated,
         ...(warning && { warning }),
         ...(warning && { pricing_warning: warning }),
+        ...(budgetWarning && { budget_warning: budgetWarning }),
         environment: envTag,
         agent_name: agentTag || "default-agent",
         currency: "USD",
