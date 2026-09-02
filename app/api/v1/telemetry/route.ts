@@ -1,83 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 
-// Pricing dictionary per 1,000,000 tokens (Rates in USD per single token)
-const MODEL_PRICING: Record<
-  string,
-  { input_cost_per_token: number; output_cost_per_token: number; provider: string }
-> = {
-  // --- OpenAI Models ---
-  "gpt-4o": {
-    input_cost_per_token: 2.5 / 1_000_000,
-    output_cost_per_token: 10.0 / 1_000_000,
-    provider: "openai",
-  },
-  "gpt-4o-mini": {
-    input_cost_per_token: 0.15 / 1_000_000,
-    output_cost_per_token: 0.6 / 1_000_000,
-    provider: "openai",
-  },
-  "o1": {
-    input_cost_per_token: 15.0 / 1_000_000,
-    output_cost_per_token: 60.0 / 1_000_000,
-    provider: "openai",
-  },
-  "o1-preview": {
-    input_cost_per_token: 15.0 / 1_000_000,
-    output_cost_per_token: 60.0 / 1_000_000,
-    provider: "openai",
-  },
-  "o1-mini": {
-    input_cost_per_token: 3.0 / 1_000_000,
-    output_cost_per_token: 12.0 / 1_000_000,
-    provider: "openai",
-  },
-
-  // --- Anthropic Models ---
-  "claude-3-5-sonnet": {
-    input_cost_per_token: 3.0 / 1_000_000,
-    output_cost_per_token: 15.0 / 1_000_000,
-    provider: "anthropic",
-  },
-  "claude-3.5-sonnet": {
-    input_cost_per_token: 3.0 / 1_000_000,
-    output_cost_per_token: 15.0 / 1_000_000,
-    provider: "anthropic",
-  },
-  "claude-3-haiku": {
-    input_cost_per_token: 0.8 / 1_000_000,
-    output_cost_per_token: 4.0 / 1_000_000,
-    provider: "anthropic",
-  },
-  "claude-3.5-haiku": {
-    input_cost_per_token: 0.8 / 1_000_000,
-    output_cost_per_token: 4.0 / 1_000_000,
-    provider: "anthropic",
-  },
-  "claude-3-opus": {
-    input_cost_per_token: 15.0 / 1_000_000,
-    output_cost_per_token: 75.0 / 1_000_000,
-    provider: "anthropic",
-  },
-
-  // --- Gemini Models ---
-  "gemini-1.5-pro": {
-    input_cost_per_token: 1.25 / 1_000_000,
-    output_cost_per_token: 5.0 / 1_000_000,
-    provider: "gemini",
-  },
-  "gemini-1.5-flash": {
-    input_cost_per_token: 0.075 / 1_000_000,
-    output_cost_per_token: 0.3 / 1_000_000,
-    provider: "gemini",
-  },
-  "gemini-2.0-flash": {
-    input_cost_per_token: 0.10 / 1_000_000,
-    output_cost_per_token: 0.4 / 1_000_000,
-    provider: "gemini",
-  },
+/** Shape returned by the model_pricing table */
+type ModelPricingRow = {
+  model: string;
+  provider: string;
+  input_price_per_million: number;
+  output_price_per_million: number;
+  is_active: boolean;
 };
 
 function getCorsHeaders() {
@@ -112,16 +45,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Fetch user_id and key record from `api_keys` table in Supabase
-    let apiKeyRecord: { id?: string; name?: string; user_id?: string; is_active?: boolean } | null = null;
+    // 2. Hash the raw token with SHA-256 and validate against `api_keys.key_hash` + `status = 'active'`
+    const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
+
+    let apiKeyRecord: { id?: string; name?: string; user_id?: string; status?: string } | null = null;
     let userId: string | null = null;
-    let keyAuthFailed = false;
 
     try {
       const { data, error } = await supabaseAdmin
         .from("api_keys")
-        .select("id, name, user_id, is_active, key")
-        .eq("key", apiKey)
+        .select("id, name, user_id, status")
+        .eq("key_hash", keyHash)
+        .eq("status", "active")
         .maybeSingle();
 
       if (error) {
@@ -129,27 +64,19 @@ export async function POST(req: NextRequest) {
       }
 
       if (data) {
-        if (data.is_active === false) {
-          return NextResponse.json(
-            { error: "Unauthorized: API Key is inactive" },
-            { status: 401, headers: getCorsHeaders() }
-          );
-        }
         apiKeyRecord = data;
         userId = data.user_id ?? null;
-      } else if (!error && (apiKey.startsWith("mx_test_") || apiKey.startsWith("am_test_"))) {
-        // Fallback for default test key
-        apiKeyRecord = { id: "test_key_01", name: "Development Key", is_active: true };
-      } else if (data === null) {
-        keyAuthFailed = true;
+      } else {
+        // No matching active key found — reject immediately
+        return NextResponse.json(
+          { error: "Unauthorized: Invalid or inactive API Key" },
+          { status: 401, headers: getCorsHeaders() }
+        );
       }
     } catch (err) {
       console.warn("API key verification notice:", err);
-    }
-
-    if (keyAuthFailed) {
       return NextResponse.json(
-        { error: "Unauthorized: Invalid API Key" },
+        { error: "Unauthorized: Key validation failed" },
         { status: 401, headers: getCorsHeaders() }
       );
     }
@@ -251,50 +178,99 @@ export async function POST(req: NextRequest) {
 
     const totalTokens = pTokens + cTokens;
 
-    // 4. Cost calculation with Prompt Caching discounts & is_estimated logic
+    // 4. Dynamic pricing lookup from `model_pricing` DB table
     const modelKey = String(model).toLowerCase().trim();
-    const pricing = MODEL_PRICING[modelKey];
 
     let roundedCost = 0;
     let cacheSavingsUSD = 0;
     let isEstimated = false;
+    let pricingWarning: string | undefined;
     let provider = body.provider || "custom";
+
+    // 4a. Query model_pricing for an active record
+    let activePricing: ModelPricingRow | null = null;
+    let fallbackPricing: ModelPricingRow | null = null;
+
+    try {
+      // First try: active record for this model
+      const { data: activeRow } = await supabaseAdmin
+        .from("model_pricing")
+        .select("model, provider, input_price_per_million, output_price_per_million, is_active")
+        .eq("model", modelKey)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (activeRow) {
+        activePricing = activeRow as ModelPricingRow;
+      } else {
+        // Fallback: any record for this model (inactive / last-known rate)
+        const { data: fallbackRow } = await supabaseAdmin
+          .from("model_pricing")
+          .select("model, provider, input_price_per_million, output_price_per_million, is_active")
+          .eq("model", modelKey)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (fallbackRow) {
+          fallbackPricing = fallbackRow as ModelPricingRow;
+        }
+      }
+    } catch (err) {
+      console.warn("model_pricing DB lookup notice:", err);
+    }
+
+    const pricing = activePricing ?? fallbackPricing;
 
     if (pricing) {
       provider = pricing.provider;
+
+      // Mark as estimated when falling back to an inactive / last-known rate
+      if (!activePricing && fallbackPricing) {
+        isEstimated = true;
+        pricingWarning = `Model "${modelKey}" is inactive or unrecognised — cost calculated using last-known rate.`;
+      }
+
+      // Convert per-million rates to per-token for arithmetic
+      const inputCostPerToken = pricing.input_price_per_million / 1_000_000;
+      const outputCostPerToken = pricing.output_price_per_million / 1_000_000;
+
       // Prompt Caching multiplier: 0.10x for Anthropic (90% off), 0.50x for OpenAI/Gemini (50% off)
       const cacheReadMultiplier = provider === "anthropic" ? 0.10 : 0.50;
       const validCachedTokens = Math.min(pTokens, Math.max(0, cachedTokens));
       const uncachedInputTokens = Math.max(0, pTokens - validCachedTokens);
 
-      const uncachedInputCost = uncachedInputTokens * pricing.input_cost_per_token;
-      const cacheReadCost = validCachedTokens * pricing.input_cost_per_token * cacheReadMultiplier;
-      const cacheCreationCost = cacheCreationTokens * pricing.input_cost_per_token * 1.25;
-      const outputCost = cTokens * pricing.output_cost_per_token;
+      const uncachedInputCost = uncachedInputTokens * inputCostPerToken;
+      const cacheReadCost = validCachedTokens * inputCostPerToken * cacheReadMultiplier;
+      const cacheCreationCost = cacheCreationTokens * inputCostPerToken * 1.25;
+      const outputCost = cTokens * outputCostPerToken;
 
+      // Primary dynamic cost formula per spec:
+      // (input_tokens / 1_000_000 * input_price_per_million) + (output_tokens / 1_000_000 * output_price_per_million)
+      // Extended here to account for prompt-caching discounts and cache-write surcharge.
       const calculatedCost = uncachedInputCost + cacheReadCost + cacheCreationCost + outputCost;
       roundedCost = Number(calculatedCost.toFixed(6));
 
       // Calculate USD saved via prompt caching
       cacheSavingsUSD = Number(
-        (validCachedTokens * pricing.input_cost_per_token * (1 - cacheReadMultiplier)).toFixed(6)
+        (validCachedTokens * inputCostPerToken * (1 - cacheReadMultiplier)).toFixed(6)
       );
-      isEstimated = false;
     } else {
-      // Unknown or custom model
+      // Completely unrecognised model — accept explicit cost or mark estimated
+      isEstimated = true;
+      pricingWarning = `Model "${modelKey}" not found in pricing table — cost could not be calculated.`;
+
       const explicitCost = body.cost ?? body.total_cost_usd ?? body.calculated_cost;
       if (explicitCost !== undefined && explicitCost !== null && !isNaN(Number(explicitCost))) {
         roundedCost = Number(Number(explicitCost).toFixed(6));
-        isEstimated = false;
       } else {
         roundedCost = 0;
-        isEstimated = true;
       }
     }
 
     const nowIso = new Date().toISOString();
 
-    // 5. Construct log payload explicitly including user_id & metadata for DB schema
+    // 5. Construct log payload — agent_name defaults to 'default-agent' if not supplied
     const logPayload = {
       user_id: userId,
       provider: provider,
@@ -304,10 +280,11 @@ export async function POST(req: NextRequest) {
       cached_tokens: cachedTokens,
       cache_creation_tokens: cacheCreationTokens,
       environment: envTag,
-      agent_name: agentTag,
+      agent_name: agentTag || "default-agent",
       end_user_id: endUserTag,
-      metadata: metadata || { environment: envTag, agent_name: agentTag },
+      metadata: metadata || { environment: envTag, agent_name: agentTag || "default-agent" },
       total_cost_usd: roundedCost,
+      is_estimated: isEstimated,
       latency_ms: Number(body.latency_ms || body.latency) || 100,
       status_code: 200,
       timestamp: nowIso,
@@ -365,8 +342,9 @@ export async function POST(req: NextRequest) {
         calculated_cost: roundedCost,
         cache_savings_usd: cacheSavingsUSD,
         is_estimated: isEstimated,
+        ...(pricingWarning && { pricing_warning: pricingWarning }),
         environment: envTag,
-        agent_name: agentTag,
+        agent_name: agentTag || "default-agent",
         currency: "USD",
         timestamp: nowIso,
       },
