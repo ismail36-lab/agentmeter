@@ -156,10 +156,14 @@ export function ApiKeyManagement({
               </tr>
             ) : (
               filteredKeys.map((item) => {
-                const prefix = item.display_prefix || (item.key?.startsWith("am_") ? item.key.slice(0, 12) : "mx_live_");
-                const suffix = item.display_suffix || (item.key ? item.key.slice(-4) : "");
-                const displayKey = item.is_legacy ? item.key : `${prefix}...${suffix}`;
-                const isLegacy = item.is_legacy || item.key?.startsWith("am_") || prefix.startsWith("am_");
+                const prefix = item.display_prefix || (item.key && !item.key.includes("...") ? item.key.slice(0, 12) : "mx_live_");
+                const suffix = item.display_suffix || (item.key && !item.key.includes("...") ? item.key.slice(-4) : "");
+                const displayKey = `${prefix}...${suffix}`;
+                const isLegacy = Boolean(
+                  (item.is_legacy || item.key?.startsWith("am_") || item.display_prefix?.startsWith("am_") || prefix.startsWith("am_")) &&
+                  !prefix.startsWith("mx_live_") &&
+                  !prefix.startsWith("mx_test_")
+                );
 
                 return (
                   <tr key={item.id} className="hover:bg-zinc-900/40 transition-colors">

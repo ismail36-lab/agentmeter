@@ -36,7 +36,7 @@ export async function GET(req: NextRequest) {
     const rawKey = String(k.key || "");
     const prefix = k.display_prefix || (rawKey ? rawKey.slice(0, 12) : "mx_live_");
     const suffix = k.display_suffix || (rawKey ? rawKey.slice(-4) : "");
-    const isLegacy = rawKey.startsWith("am_") || prefix.startsWith("am_") || !k.key_hash;
+    const isLegacy = rawKey.startsWith("am_") || prefix.startsWith("am_");
 
     return {
       id: k.id,
@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
       is_active: k.is_active,
       created_at: k.created_at,
       is_legacy: isLegacy,
-      key: isLegacy ? rawKey : `${prefix}...${suffix}`,
+      key: `${prefix}...${suffix}`,
     };
   });
 
