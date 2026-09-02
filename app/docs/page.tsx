@@ -19,6 +19,7 @@ import {
   FileCode,
   Key,
   Database,
+  Server,
   Check,
 } from "lucide-react";
 
@@ -65,29 +66,82 @@ with meter.trace(model="claude-3-5-sonnet", metadata={"workflow": "code_review"}
 
   const nodeInstallCode = `npm i meterix`;
 
-  const nodeSnippet = `import { Meterix } from "meterix";
+  const nodeSnippet = `import { MeterixClient } from "@/lib/meterix";
 
-// Initialize client with secret API key
-const meter = new Meterix({
-  apiKey: process.env.METERIX_API_KEY || "mx_live_your_api_key_here",
+// Singleton — initialize once at module level
+const meter = new MeterixClient({
+  apiKey: process.env.METERIX_API_KEY,  // mx_live_...
+  flushIntervalMs: 3000,               // auto-flush every 3 seconds
+  maxBufferSize: 50,                   // force flush when buffer hits 50
 });
 
 async function runAgent() {
-  // Send LLM completion telemetry payload
-  const result = await meter.logUsage({
+  // logUsage() returns immediately — { queued: true }
+  // Network request happens in the background batch flush
+  const queued = meter.logUsage({
     model: "gpt-4o",
-    prompt_tokens: 1500,
-    completion_tokens: 450,
+    promptTokens: 1500,
+    completionTokens: 450,
     metadata: {
       environment: "production",
-      session_id: "sess_881923"
-    }
+      agent_name: "SupportAgent",
+      session_id: "sess_881923",
+    },
   });
 
-  console.log("Telemetry ingested successfully:", result);
+  console.log(queued); // { queued: true }
+
+  // Optional: manually flush all buffered logs immediately
+  await meter.flush();
 }
 
 runAgent();`;
+
+  const vercelSnippet = `// app/api/route.ts — Next.js Route Handler (Vercel Edge / Serverless)
+import { waitUntil } from "@vercel/functions";
+import { MeterixClient, flushWithWaitUntil } from "@/lib/meterix";
+
+const meter = new MeterixClient({ apiKey: process.env.METERIX_API_KEY });
+
+export async function POST(req: Request) {
+  // Your LLM call here
+  const result = await callLLM(req);
+
+  // Queue telemetry — fire-and-forget
+  meter.logUsage({
+    model: "gpt-4o",
+    promptTokens: result.usage.prompt_tokens,
+    completionTokens: result.usage.completion_tokens,
+    metadata: { environment: "production" },
+  });
+
+  // waitUntil() ensures the flush completes AFTER the response is returned
+  // This is critical for serverless — avoids cold-start truncation
+  flushWithWaitUntil(meter, waitUntil);
+
+  return Response.json({ answer: result.content });
+}`;
+
+  const shutdownSnippet = `// Node.js Long-Running Server (Express, Fastify, etc.)
+import { MeterixClient } from "@/lib/meterix";
+
+// MeterixClient automatically registers these — shown here for reference:
+const meter = new MeterixClient({
+  apiKey: process.env.METERIX_API_KEY,
+  registerShutdownHandlers: true, // default: true
+});
+
+// You can also register manually for full control:
+process.once("SIGTERM", async () => {
+  console.log("SIGTERM received — flushing telemetry...");
+  await meter.flush();
+  meter.destroy();  // stop the background flush interval
+  process.exit(0);
+});
+
+process.once("beforeExit", async () => {
+  await meter.flush();
+});`;
 
   const curlSnippet = `curl -X POST ${baseUrl}/api/v1/telemetry \\
   -H "Authorization: Bearer mx_live_your_api_key_here" \\
@@ -213,7 +267,20 @@ runAgent();`;
             </div>
             <div>
               <h3 className="text-xs font-semibold text-zinc-200">Node.js / TypeScript</h3>
-              <p className="text-[11px] text-zinc-500">npm i meterix</p>
+              <p className="text-[11px] text-zinc-500">Async buffered SDK</p>
+            </div>
+          </a>
+
+          <a
+            href="#vercel-pattern"
+            className="bento-card p-4 hover:border-emerald-500/50 transition-all group flex items-center gap-3 w-full"
+          >
+            <div className="p-2.5 rounded-xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 group-hover:scale-105 transition-transform">
+              <Server className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-xs font-semibold text-zinc-200">Vercel / Serverless</h3>
+              <p className="text-[11px] text-zinc-500">waitUntil() pattern</p>
             </div>
           </a>
 
@@ -333,6 +400,85 @@ runAgent();`;
                 )}
               </button>
               <pre className="text-zinc-200 leading-relaxed">{nodeSnippet}</pre>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Section 2b: Vercel / Serverless Pattern ─────────── */}
+        <section id="vercel-pattern" className="bento-card p-6 space-y-5 w-full border border-zinc-800/80 bg-zinc-900/90">
+          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+            <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2 font-sans tracking-tight">
+              <Server className="h-4.5 w-4.5 text-emerald-400" />
+              2b. Vercel &amp; Serverless Environments
+            </h2>
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
+              waitUntil() pattern
+            </span>
+          </div>
+
+          <p className="text-xs text-zinc-400 font-sans leading-relaxed">
+            In serverless environments (Vercel Functions, Next.js Route Handlers, Edge Runtime), the process may be
+            frozen immediately after sending the HTTP response — before background flushes complete.
+            Use <code className="text-emerald-300 font-mono">@vercel/functions</code>{" "}waitUntil() to keep the function alive
+            until the telemetry batch is fully flushed.
+          </p>
+
+          {/* Vercel waitUntil snippet */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-sans">Next.js Route Handler + waitUntil()</h3>
+            <div className="relative bg-[#0c0d0e] border border-zinc-800 rounded-lg p-4 font-mono text-xs text-zinc-300 w-full max-w-full overflow-x-auto">
+              <button
+                onClick={() => copyToClipboard(vercelSnippet, "vercel_snippet")}
+                className="absolute right-3 top-3 p-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
+                title="Copy Vercel snippet"
+              >
+                {copiedId === "vercel_snippet" ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+              <pre className="text-zinc-200 leading-relaxed">{vercelSnippet}</pre>
+            </div>
+          </div>
+
+          {/* Key facts */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs">
+              <div className="font-bold font-mono text-emerald-400 mb-1">logUsage()</div>
+              <p className="text-[11px] text-zinc-400">Returns <code className="text-zinc-200">{'{ queued: true }'}</code> instantly. Never blocks your response.</p>
+            </div>
+            <div className="p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 text-xs">
+              <div className="font-bold font-mono text-sky-400 mb-1">flushWithWaitUntil()</div>
+              <p className="text-[11px] text-zinc-400">Wraps <code className="text-zinc-200">meter.flush()</code> in Vercel's waitUntil to guarantee delivery post-response.</p>
+            </div>
+            <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs">
+              <div className="font-bold font-mono text-amber-400 mb-1">Silent Failures</div>
+              <p className="text-[11px] text-zinc-400">Network errors are caught internally — never propagated to your application.</p>
+            </div>
+          </div>
+
+          {/* Node.js graceful shutdown */}
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-sans">Node.js Graceful Shutdown (SIGTERM / beforeExit)</h3>
+            <p className="text-xs text-zinc-400 font-sans">
+              For long-running Node.js servers, <code className="text-zinc-200 font-mono">MeterixClient</code> automatically
+              registers <code className="text-zinc-200 font-mono">beforeExit</code> and <code className="text-zinc-200 font-mono">SIGTERM</code> listeners
+              to flush any remaining buffered logs before process exit.
+            </p>
+            <div className="relative bg-[#0c0d0e] border border-zinc-800 rounded-lg p-4 font-mono text-xs text-zinc-300 w-full max-w-full overflow-x-auto">
+              <button
+                onClick={() => copyToClipboard(shutdownSnippet, "shutdown_snippet")}
+                className="absolute right-3 top-3 p-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
+                title="Copy shutdown snippet"
+              >
+                {copiedId === "shutdown_snippet" ? (
+                  <CheckCircle2 className="h-4 w-4 text-amber-400" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+              <pre className="text-zinc-200 leading-relaxed">{shutdownSnippet}</pre>
             </div>
           </div>
         </section>
