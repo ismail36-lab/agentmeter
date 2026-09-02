@@ -184,7 +184,7 @@ export async function POST(req: NextRequest) {
     let roundedCost = 0;
     let cacheSavingsUSD = 0;
     let isEstimated = false;
-    let pricingWarning: string | undefined;
+    let warning: string | undefined;
     let provider = body.provider || "custom";
 
     // 4a. Query model_pricing for an active record
@@ -193,24 +193,61 @@ export async function POST(req: NextRequest) {
 
     try {
       // First try: active record for this model
-      const { data: activeRow } = await supabaseAdmin
+      let { data: activeRow } = await supabaseAdmin
         .from("model_pricing")
         .select("model, provider, input_price_per_million, output_price_per_million, is_active")
         .eq("model", modelKey)
         .eq("is_active", true)
         .maybeSingle();
 
+      if (!activeRow) {
+        const { data: activeRowByName } = await supabaseAdmin
+          .from("model_pricing")
+          .select("model_name, provider, input_price_per_million, output_price_per_million, is_active")
+          .eq("model_name", modelKey)
+          .eq("is_active", true)
+          .maybeSingle();
+        if (activeRowByName) {
+          activeRow = {
+            model: (activeRowByName as any).model_name,
+            provider: activeRowByName.provider,
+            input_price_per_million: activeRowByName.input_price_per_million,
+            output_price_per_million: activeRowByName.output_price_per_million,
+            is_active: activeRowByName.is_active,
+          };
+        }
+      }
+
       if (activeRow) {
         activePricing = activeRow as ModelPricingRow;
       } else {
         // Fallback: any record for this model (inactive / last-known rate)
-        const { data: fallbackRow } = await supabaseAdmin
+        let { data: fallbackRow } = await supabaseAdmin
           .from("model_pricing")
           .select("model, provider, input_price_per_million, output_price_per_million, is_active")
           .eq("model", modelKey)
           .order("updated_at", { ascending: false })
           .limit(1)
           .maybeSingle();
+
+        if (!fallbackRow) {
+          const { data: fallbackRowByName } = await supabaseAdmin
+            .from("model_pricing")
+            .select("model_name, provider, input_price_per_million, output_price_per_million, is_active")
+            .eq("model_name", modelKey)
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          if (fallbackRowByName) {
+            fallbackRow = {
+              model: (fallbackRowByName as any).model_name,
+              provider: fallbackRowByName.provider,
+              input_price_per_million: fallbackRowByName.input_price_per_million,
+              output_price_per_million: fallbackRowByName.output_price_per_million,
+              is_active: fallbackRowByName.is_active,
+            };
+          }
+        }
 
         if (fallbackRow) {
           fallbackPricing = fallbackRow as ModelPricingRow;
@@ -220,22 +257,14 @@ export async function POST(req: NextRequest) {
       console.warn("model_pricing DB lookup notice:", err);
     }
 
-    const pricing = activePricing ?? fallbackPricing;
+    if (activePricing) {
+      // Active and valid model
+      isEstimated = false;
+      provider = activePricing.provider || provider;
 
-    if (pricing) {
-      provider = pricing.provider;
+      const inputCostPerToken = activePricing.input_price_per_million / 1_000_000;
+      const outputCostPerToken = activePricing.output_price_per_million / 1_000_000;
 
-      // Mark as estimated when falling back to an inactive / last-known rate
-      if (!activePricing && fallbackPricing) {
-        isEstimated = true;
-        pricingWarning = `Model "${modelKey}" is inactive or unrecognised — cost calculated using last-known rate.`;
-      }
-
-      // Convert per-million rates to per-token for arithmetic
-      const inputCostPerToken = pricing.input_price_per_million / 1_000_000;
-      const outputCostPerToken = pricing.output_price_per_million / 1_000_000;
-
-      // Prompt Caching multiplier: 0.10x for Anthropic (90% off), 0.50x for OpenAI/Gemini (50% off)
       const cacheReadMultiplier = provider === "anthropic" ? 0.10 : 0.50;
       const validCachedTokens = Math.min(pTokens, Math.max(0, cachedTokens));
       const uncachedInputTokens = Math.max(0, pTokens - validCachedTokens);
@@ -245,26 +274,49 @@ export async function POST(req: NextRequest) {
       const cacheCreationCost = cacheCreationTokens * inputCostPerToken * 1.25;
       const outputCost = cTokens * outputCostPerToken;
 
-      // Primary dynamic cost formula per spec:
-      // (input_tokens / 1_000_000 * input_price_per_million) + (output_tokens / 1_000_000 * output_price_per_million)
-      // Extended here to account for prompt-caching discounts and cache-write surcharge.
       const calculatedCost = uncachedInputCost + cacheReadCost + cacheCreationCost + outputCost;
       roundedCost = Number(calculatedCost.toFixed(6));
 
-      // Calculate USD saved via prompt caching
+      cacheSavingsUSD = Number(
+        (validCachedTokens * inputCostPerToken * (1 - cacheReadMultiplier)).toFixed(6)
+      );
+    } else if (fallbackPricing) {
+      // Deprecated / inactive model (cost calculated using last-known rate)
+      isEstimated = true;
+      warning = "model deprecated or unrecognized, cost is an estimate";
+      provider = fallbackPricing.provider || provider;
+
+      const inputCostPerToken = fallbackPricing.input_price_per_million / 1_000_000;
+      const outputCostPerToken = fallbackPricing.output_price_per_million / 1_000_000;
+
+      const cacheReadMultiplier = provider === "anthropic" ? 0.10 : 0.50;
+      const validCachedTokens = Math.min(pTokens, Math.max(0, cachedTokens));
+      const uncachedInputTokens = Math.max(0, pTokens - validCachedTokens);
+
+      const uncachedInputCost = uncachedInputTokens * inputCostPerToken;
+      const cacheReadCost = validCachedTokens * inputCostPerToken * cacheReadMultiplier;
+      const cacheCreationCost = cacheCreationTokens * inputCostPerToken * 1.25;
+      const outputCost = cTokens * outputCostPerToken;
+
+      const calculatedCost = uncachedInputCost + cacheReadCost + cacheCreationCost + outputCost;
+      roundedCost = Number(calculatedCost.toFixed(6));
+
       cacheSavingsUSD = Number(
         (validCachedTokens * inputCostPerToken * (1 - cacheReadMultiplier)).toFixed(6)
       );
     } else {
-      // Completely unrecognised model — accept explicit cost or mark estimated
+      // Unrecognized model (cost calculated using explicit cost or standard default fallback rate)
       isEstimated = true;
-      pricingWarning = `Model "${modelKey}" not found in pricing table — cost could not be calculated.`;
+      warning = "model deprecated or unrecognized, cost is an estimate";
 
       const explicitCost = body.cost ?? body.total_cost_usd ?? body.calculated_cost;
       if (explicitCost !== undefined && explicitCost !== null && !isNaN(Number(explicitCost))) {
         roundedCost = Number(Number(explicitCost).toFixed(6));
       } else {
-        roundedCost = 0;
+        const defaultInputCostPerToken = 1.0 / 1_000_000;
+        const defaultOutputCostPerToken = 3.0 / 1_000_000;
+        const calculatedCost = pTokens * defaultInputCostPerToken + cTokens * defaultOutputCostPerToken;
+        roundedCost = Number(calculatedCost.toFixed(6));
       }
     }
 
@@ -342,7 +394,8 @@ export async function POST(req: NextRequest) {
         calculated_cost: roundedCost,
         cache_savings_usd: cacheSavingsUSD,
         is_estimated: isEstimated,
-        ...(pricingWarning && { pricing_warning: pricingWarning }),
+        ...(warning && { warning }),
+        ...(warning && { pricing_warning: warning }),
         environment: envTag,
         agent_name: agentTag || "default-agent",
         currency: "USD",

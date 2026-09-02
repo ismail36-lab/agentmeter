@@ -24,7 +24,7 @@ export async function GET() {
   try {
     const { data, error } = await supabaseAdmin
       .from("model_pricing")
-      .select("model_name, provider, input_price_per_million, output_price_per_million")
+      .select("model_name, provider, input_price_per_million, output_price_per_million, is_active")
       .eq("is_active", true)
       .order("provider", { ascending: true })
       .order("model_name", { ascending: true });
