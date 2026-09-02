@@ -174,6 +174,9 @@ export default function Dashboard() {
     spend: number;
     requests: number;
     model: string;
+    top_model?: string;
+    distinct_models?: number;
+    extra_models_count?: number;
   }[]>([]);
 
   // API Key Management State
@@ -994,20 +997,36 @@ export default function Dashboard() {
               </p>
             </div>
             <div className="space-y-2.5 font-mono text-xs">
-              {agentBreakdown.map((agent) => (
-                <div
-                  key={agent.name}
-                  className="flex items-center justify-between p-2 rounded-lg bg-zinc-950/60 border border-zinc-800/60 text-zinc-300"
-                >
-                  <div className="min-w-0 pr-2">
-                    <p className="font-semibold text-zinc-200 truncate">{agent.name}</p>
-                    <p className="text-[10px] text-zinc-500 font-sans">{agent.model} • {agent.requests} requests</p>
+              {agentBreakdown.map((agent) => {
+                const topModelName = agent.top_model || agent.model || "gpt-4o";
+                const distinctCount = agent.distinct_models ?? 1;
+                const extraCount = agent.extra_models_count ?? (distinctCount > 1 ? distinctCount - 1 : 0);
+
+                return (
+                  <div
+                    key={agent.name}
+                    className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800/60 text-zinc-300"
+                  >
+                    <div className="min-w-0 pr-2">
+                      <p className="font-semibold text-zinc-200 truncate">{agent.name}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5 font-sans">
+                        <span className="text-[11px] text-zinc-400 font-mono bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded">
+                          {topModelName}
+                        </span>
+                        {extraCount > 0 && (
+                          <span className="text-[10px] font-semibold text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-1.5 py-0.5 rounded-full">
+                            +{extraCount} more
+                          </span>
+                        )}
+                        <span className="text-[10px] text-zinc-500">• {agent.requests} requests</span>
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0 font-mono">
+                      <span className="font-bold text-indigo-400">${agent.spend.toFixed(4)}</span>
+                    </div>
                   </div>
-                  <div className="text-right shrink-0">
-                    <span className="font-bold text-indigo-400">${agent.spend.toFixed(4)}</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

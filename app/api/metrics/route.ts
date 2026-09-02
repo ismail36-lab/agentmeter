@@ -85,10 +85,10 @@ export async function GET(req: NextRequest) {
       ];
 
       const demoAgentBreakdown = [
-        { name: "customer-support-bot", spend: 6.8400, requests: 142, model: "gpt-4o" },
-        { name: "code-review-assistant", spend: 4.8250, requests: 98, model: "claude-3-5-sonnet" },
-        { name: "doc-summarizer", spend: 2.4250, requests: 74, model: "gemini-1.5-pro" },
-        { name: "triage-router", spend: 0.7350, requests: 28, model: "gpt-4o-mini" },
+        { name: "customer-support-bot", spend: 6.8400, requests: 142, model: "gpt-4o", top_model: "gpt-4o", distinct_models: 3, extra_models_count: 2 },
+        { name: "code-review-assistant", spend: 4.8250, requests: 98, model: "claude-3-5-sonnet", top_model: "claude-3-5-sonnet", distinct_models: 1, extra_models_count: 0 },
+        { name: "doc-summarizer", spend: 2.4250, requests: 74, model: "gemini-1.5-pro", top_model: "gemini-1.5-pro", distinct_models: 2, extra_models_count: 1 },
+        { name: "triage-router", spend: 0.7350, requests: 28, model: "gpt-4o-mini", top_model: "gpt-4o-mini", distinct_models: 1, extra_models_count: 0 },
       ];
 
       const demoCachingMetrics = {
@@ -188,22 +188,52 @@ export async function GET(req: NextRequest) {
       percentage: totalSpend > 0 ? Number(((data.spend / totalSpend) * 100).toFixed(1)) : 0,
     }));
 
-    // Agent Breakdown calculation
-    const agentMap: Record<string, { spend: number; requests: number; model: string }> = {};
+    // Agent Breakdown calculation (two-level aggregation per agent_name)
+    const agentMap: Record<
+      string,
+      { spend: number; requests: number; modelSpendMap: Record<string, number> }
+    > = {};
+
     userLogs.forEach((log) => {
       const agent = log.agent_name || log.metadata?.agent_name || "default-agent";
-      if (!agentMap[agent]) agentMap[agent] = { spend: 0, requests: 0, model: log.model || "gpt-4o" };
-      agentMap[agent].spend += getLogCost(log);
+      const model = log.model || "gpt-4o";
+      const cost = getLogCost(log);
+
+      if (!agentMap[agent]) {
+        agentMap[agent] = { spend: 0, requests: 0, modelSpendMap: {} };
+      }
+      agentMap[agent].spend += cost;
       agentMap[agent].requests += 1;
+      agentMap[agent].modelSpendMap[model] = (agentMap[agent].modelSpendMap[model] || 0) + cost;
     });
 
     const agentBreakdown = Object.entries(agentMap)
-      .map(([name, data]) => ({
-        name,
-        spend: Number(data.spend.toFixed(4)),
-        requests: data.requests,
-        model: data.model,
-      }))
+      .map(([name, data]) => {
+        const models = Object.keys(data.modelSpendMap);
+        const distinctModelsCount = models.length;
+
+        // Determine top model with highest spend
+        let topModel = models[0] || "gpt-4o";
+        let maxSpend = -1;
+        models.forEach((m) => {
+          if (data.modelSpendMap[m] > maxSpend) {
+            maxSpend = data.modelSpendMap[m];
+            topModel = m;
+          }
+        });
+
+        const extraModelsCount = Math.max(0, distinctModelsCount - 1);
+
+        return {
+          name,
+          spend: Number(data.spend.toFixed(4)),
+          requests: data.requests,
+          model: topModel,
+          top_model: topModel,
+          distinct_models: distinctModelsCount,
+          extra_models_count: extraModelsCount,
+        };
+      })
       .sort((a, b) => b.spend - a.spend)
       .slice(0, 5);
 
