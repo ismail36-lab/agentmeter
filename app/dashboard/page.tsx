@@ -98,6 +98,13 @@ interface ModelBreakdownItem {
   color: string;
 }
 
+interface ModelPricingItem {
+  model: string;
+  provider: string;
+  input_price_per_million: number;
+  output_price_per_million: number;
+}
+
 const MODEL_COLORS: Record<string, string> = {
   "gpt-4o": "#10b981",          // emerald-500
   "gpt-4o-mini": "#0ea5e9",     // sky-500
@@ -275,6 +282,34 @@ export default function Dashboard() {
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
 
+  // Dynamic model pricing list (fetched from model_pricing table)
+  const [pricingModels, setPricingModels] = useState<ModelPricingItem[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+
+  /** Fetch active models from model_pricing table via Supabase client */
+  const fetchModelPricing = async () => {
+    setIsLoadingModels(true);
+    try {
+      const { data, error } = await supabase
+        .from("model_pricing")
+        .select("model, provider, input_price_per_million, output_price_per_million")
+        .eq("is_active", true)
+        .order("provider", { ascending: true })
+        .order("model", { ascending: true });
+
+      if (!error && data && data.length > 0) {
+        setPricingModels(data as ModelPricingItem[]);
+        // Keep the selected model valid; fall back to first active model if current isn't listed
+        const modelNames = data.map((m: ModelPricingItem) => m.model);
+        setTestModel((prev) => (modelNames.includes(prev) ? prev : modelNames[0]));
+      }
+    } catch (err) {
+      console.warn("Could not fetch model pricing:", err);
+    } finally {
+      setIsLoadingModels(false);
+    }
+  };
+
   // 1. Fetch User API Keys
   const fetchApiKeys = async () => {
     setIsLoadingKeys(true);
@@ -402,6 +437,8 @@ export default function Dashboard() {
         fetchPlanDetails();
       }
     });
+    // Model pricing can be fetched independently of auth (public table)
+    fetchModelPricing();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1029,17 +1066,32 @@ export default function Dashboard() {
               </div>
 
               <div>
-                <label className="block text-zinc-500 mb-1">Target Model</label>
+                <label className="block text-zinc-500 mb-1 flex items-center gap-1.5">
+                  Target Model
+                  {isLoadingModels && (
+                    <Loader2 className="h-3 w-3 animate-spin text-zinc-600" />
+                  )}
+                </label>
                 <select
                   value={testModel}
                   onChange={(e) => setTestModel(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 focus:outline-none focus:border-zinc-600 transition-colors"
+                  disabled={isLoadingModels}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 focus:outline-none focus:border-zinc-600 transition-colors disabled:opacity-50"
                 >
-                  <option value="gpt-4o">gpt-4o ($2.50 / $10.00 per 1M)</option>
-                  <option value="gpt-4o-mini">gpt-4o-mini ($0.15 / $0.60 per 1M)</option>
-                  <option value="claude-3-5-sonnet">claude-3-5-sonnet ($3.00 / $15.00 per 1M)</option>
-                  <option value="gemini-1.5-pro">gemini-1.5-pro ($1.25 / $5.00 per 1M)</option>
-                  <option value="gemini-1.5-flash">gemini-1.5-flash ($0.075 / $0.30 per 1M)</option>
+                  {pricingModels.length === 0 ? (
+                    // Skeleton / fallback while loading or if DB returns empty
+                    isLoadingModels ? (
+                      <option value="">Loading models…</option>
+                    ) : (
+                      <option value="gpt-4o">gpt-4o (fallback — no models loaded)</option>
+                    )
+                  ) : (
+                    pricingModels.map((m) => (
+                      <option key={m.model} value={m.model}>
+                        {m.model} (${m.input_price_per_million.toFixed(2)} / ${m.output_price_per_million.toFixed(2)} per 1M)
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 
