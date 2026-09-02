@@ -54,8 +54,12 @@ interface ApiKeyItem {
   id: string;
   name: string;
   key: string;
+  display_prefix?: string;
+  display_suffix?: string;
   is_active: boolean;
   created_at: string;
+  is_legacy?: boolean;
+  fullKey?: string;
 }
 
 interface UsageLog {

@@ -1,15 +1,19 @@
 "use client";
 
 import React, { useState } from "react";
-import { Key, Plus, Copy, CheckCircle2, Trash2, Eye, EyeOff, Loader2, Search, AlertCircle, RefreshCw } from "lucide-react";
+import { Key, Plus, Copy, CheckCircle2, Trash2, Loader2, Search, RefreshCw } from "lucide-react";
 import { ApiKeyModal } from "./ApiKeyModal";
 
 export interface ApiKeyItem {
   id: string;
   name: string;
   key: string;
+  display_prefix?: string;
+  display_suffix?: string;
   is_active: boolean;
   created_at: string;
+  is_legacy?: boolean;
+  fullKey?: string;
 }
 
 interface ApiKeyManagementProps {
@@ -32,11 +36,6 @@ export function ApiKeyManagement({
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [visibleKeyIds, setVisibleKeyIds] = useState<Record<string, boolean>>({});
-
-  const toggleVisibility = (id: string) => {
-    setVisibleKeyIds((prev) => ({ ...prev, [id]: !prev[id] }));
-  };
 
   const copyToClipboard = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -75,7 +74,7 @@ export function ApiKeyManagement({
 
   const filteredKeys = apiKeys.filter((k) =>
     k.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    k.key.toLowerCase().includes(searchTerm.toLowerCase())
+    (k.key && k.key.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   return (
@@ -157,34 +156,27 @@ export function ApiKeyManagement({
               </tr>
             ) : (
               filteredKeys.map((item) => {
-                const isVisible = Boolean(visibleKeyIds[item.id]);
-                // Extract actual unique key prefix from database record
-                const getMaskedKey = (rawKey: string) => {
-                  if (!rawKey) return "";
-                  if (rawKey.startsWith("mx_live_") || rawKey.startsWith("mx_test_")) {
-                    const prefixPart = rawKey.slice(0, 16);
-                    return `${prefixPart}••••••••••••••••`;
-                  }
-                  const prefixPart = rawKey.slice(0, 12);
-                  return `${prefixPart}••••••••••••••••`;
-                };
-                const displayKey = isVisible ? item.key : getMaskedKey(item.key);
+                const prefix = item.display_prefix || (item.key?.startsWith("am_") ? item.key.slice(0, 12) : "mx_live_");
+                const suffix = item.display_suffix || (item.key ? item.key.slice(-4) : "");
+                const displayKey = item.is_legacy ? item.key : `${prefix}...${suffix}`;
+                const isLegacy = item.is_legacy || item.key?.startsWith("am_") || prefix.startsWith("am_");
 
                 return (
                   <tr key={item.id} className="hover:bg-zinc-900/40 transition-colors">
-                    <td className="py-3.5 px-4 font-semibold text-zinc-200">{item.name}</td>
-                    <td className="py-3.5 px-4 text-zinc-400">
+                    <td className="py-3.5 px-4 font-semibold text-zinc-200">
                       <div className="flex items-center gap-2">
-                        <span className="font-mono text-zinc-300 truncate break-all max-w-[180px] sm:max-w-xs block">{displayKey}</span>
-                        <button
-                          type="button"
-                          onClick={() => toggleVisibility(item.id)}
-                          className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
-                          title={isVisible ? "Hide Key" : "Show Key"}
-                        >
-                          {isVisible ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                        </button>
+                        <span>{item.name}</span>
+                        {isLegacy && (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">
+                            Legacy Key
+                          </span>
+                        )}
                       </div>
+                    </td>
+                    <td className="py-3.5 px-4 text-zinc-400">
+                      <span className="font-mono text-zinc-300 truncate break-all max-w-[180px] sm:max-w-xs block">
+                        {displayKey}
+                      </span>
                     </td>
                     <td className="py-3.5 px-4 text-zinc-400">
                       {new Date(item.created_at).toLocaleDateString("en-US", {
@@ -209,9 +201,9 @@ export function ApiKeyManagement({
                       <div className="flex items-center justify-end gap-2">
                         <button
                           type="button"
-                          onClick={() => copyToClipboard(item.key, item.id)}
+                          onClick={() => copyToClipboard(item.fullKey || displayKey, item.id)}
                           className="p-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors border border-zinc-800"
-                          title="Copy Key"
+                          title="Copy Key Reference"
                         >
                           {copiedId === item.id ? (
                             <CheckCircle2 className="h-3.5 w-3.5 text-indigo-400" />
@@ -267,6 +259,9 @@ export function ApiKeyManagement({
             id: newKey.id,
             name: newKey.name,
             key: newKey.key,
+            fullKey: (newKey as any).fullKey || newKey.key,
+            display_prefix: (newKey as any).display_prefix,
+            display_suffix: (newKey as any).display_suffix,
             is_active: true,
             created_at: new Date().toISOString(),
           });

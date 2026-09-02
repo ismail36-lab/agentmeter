@@ -36,8 +36,9 @@ export function ApiKeyModal({ isOpen, onClose, onKeyCreated }: ApiKeyModalProps)
       }
 
       if (data.key) {
-        setGeneratedKey(data.key.key);
-        onKeyCreated(data.key);
+        const fullSecretKey = data.key.fullKey || data.key.key;
+        setGeneratedKey(fullSecretKey);
+        onKeyCreated({ ...data.key, key: fullSecretKey });
       }
     } catch (err: any) {
       setError(err.message || "Failed to generate API key");

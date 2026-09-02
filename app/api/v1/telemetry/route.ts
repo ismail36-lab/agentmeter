@@ -45,29 +45,51 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Hash the raw token with SHA-256 and validate against `api_keys.key_hash` + `status = 'active'`
+    // 2. Hash the raw token with SHA-256 and validate against `api_keys.key_hash` (with fallback for legacy keys)
     const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
 
-    let apiKeyRecord: { id?: string; name?: string; user_id?: string; status?: string } | null = null;
+    let apiKeyRecord: { id?: string; name?: string; user_id?: string; is_active?: boolean } | null = null;
     let userId: string | null = null;
 
     try {
-      const { data, error } = await supabaseAdmin
+      // Primary lookup: search by SHA-256 key_hash
+      const { data: hashData, error: hashError } = await supabaseAdmin
         .from("api_keys")
-        .select("id, name, user_id, status")
+        .select("id, name, user_id, is_active, status")
         .eq("key_hash", keyHash)
-        .eq("status", "active")
         .maybeSingle();
 
-      if (error) {
-        console.warn("Supabase api_keys query notice:", error.message);
+      let data = hashData;
+
+      if (!data && !hashError) {
+        // Secondary fallback lookup: search by raw key column for legacy am_ keys or unhashed keys
+        const { data: legacyData, error: legacyError } = await supabaseAdmin
+          .from("api_keys")
+          .select("id, name, user_id, is_active, status")
+          .eq("key", apiKey)
+          .maybeSingle();
+
+        if (legacyError) {
+          console.warn("Supabase legacy key query notice:", legacyError.message);
+        }
+        data = legacyData;
+      } else if (hashError) {
+        console.warn("Supabase api_keys key_hash query notice:", hashError.message);
       }
 
       if (data) {
-        apiKeyRecord = data;
-        userId = data.user_id ?? null;
+        const isActive = data.is_active !== false && data.status !== "inactive";
+        if (isActive) {
+          apiKeyRecord = data;
+          userId = data.user_id ?? null;
+        } else {
+          return NextResponse.json(
+            { error: "Unauthorized: API Key is inactive" },
+            { status: 401, headers: getCorsHeaders() }
+          );
+        }
       } else {
-        // No matching active key found — reject immediately
+        // Key not found in DB
         return NextResponse.json(
           { error: "Unauthorized: Invalid or inactive API Key" },
           { status: 401, headers: getCorsHeaders() }

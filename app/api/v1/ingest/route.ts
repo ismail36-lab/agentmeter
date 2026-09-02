@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -43,26 +44,30 @@ export async function POST(req: NextRequest) {
     }
 
     // ── 2. Validate key against api_keys table ────────────────────────────
-    //  Uses the identical resilient try-catch pattern from /api/v1/telemetry
-    //  which is proven to work on this Supabase project.
-    //  Column `key` stores raw plain-text key strings (no hashing).
+    const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
+
     let userId: string | null = null;
     let keyValid = false;
     let keyInactive = false;
 
     try {
-      const { data, error } = await supabaseAdmin
+      // Primary lookup: SHA-256 key_hash
+      const { data: hashData, error: hashError } = await supabaseAdmin
         .from("api_keys")
         .select("id, user_id, is_active")
-        .eq("key", apiKey)
+        .eq("key_hash", keyHash)
         .maybeSingle();
 
-      if (error) {
-        // Log full error details for Vercel runtime log inspection
-        console.warn(
-          "[ingest] api_keys lookup warning:",
-          JSON.stringify({ code: error.code, message: error.message, details: error.details, hint: error.hint })
-        );
+      let data = hashData;
+
+      if (!data && !hashError) {
+        // Secondary fallback: raw key column
+        const { data: legacyData } = await supabaseAdmin
+          .from("api_keys")
+          .select("id, user_id, is_active")
+          .eq("key", apiKey)
+          .maybeSingle();
+        data = legacyData;
       }
 
       if (data) {
@@ -72,12 +77,7 @@ export async function POST(req: NextRequest) {
           keyValid = true;
           userId = data.user_id ?? null;
         }
-      } else if (!error) {
-        // data is null and no error → key genuinely not found in DB
-        console.log("[ingest] Key not found in api_keys table:", apiKey.slice(0, 15) + "…");
       }
-      // If error occurred: do NOT hard-reject yet — fall through to keyValid check
-      // (same behaviour as working telemetry route)
     } catch (err) {
       console.warn("[ingest] api_keys lookup exception:", err);
     }
