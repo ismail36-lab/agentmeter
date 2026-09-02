@@ -99,7 +99,7 @@ interface ModelBreakdownItem {
 }
 
 interface ModelPricingItem {
-  model: string;
+  model_name: string;
   provider: string;
   input_price_per_million: number;
   output_price_per_million: number;
@@ -286,21 +286,21 @@ export default function Dashboard() {
   const [pricingModels, setPricingModels] = useState<ModelPricingItem[]>([]);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
 
-  /** Fetch active models from model_pricing table via Supabase client */
+  /** Fetch active models from /api/models (uses supabaseAdmin, bypasses RLS) */
   const fetchModelPricing = async () => {
     setIsLoadingModels(true);
     try {
-      const { data, error } = await supabase
-        .from("model_pricing")
-        .select("model, provider, input_price_per_million, output_price_per_million")
-        .eq("is_active", true)
-        .order("provider", { ascending: true })
-        .order("model", { ascending: true });
-
-      if (!error && data && data.length > 0) {
-        setPricingModels(data as ModelPricingItem[]);
+      const res = await fetch("/api/models", { cache: "no-store" });
+      if (!res.ok) {
+        console.warn("GET /api/models returned", res.status);
+        return;
+      }
+      const data = await res.json();
+      const models: ModelPricingItem[] = data.models ?? [];
+      if (models.length > 0) {
+        setPricingModels(models);
         // Keep the selected model valid; fall back to first active model if current isn't listed
-        const modelNames = data.map((m: ModelPricingItem) => m.model);
+        const modelNames = models.map((m) => m.model_name);
         setTestModel((prev) => (modelNames.includes(prev) ? prev : modelNames[0]));
       }
     } catch (err) {
@@ -1087,8 +1087,8 @@ export default function Dashboard() {
                     )
                   ) : (
                     pricingModels.map((m) => (
-                      <option key={m.model} value={m.model}>
-                        {m.model} (${m.input_price_per_million.toFixed(2)} / ${m.output_price_per_million.toFixed(2)} per 1M)
+                      <option key={m.model_name} value={m.model_name}>
+                        {m.model_name} (${m.input_price_per_million.toFixed(2)} / ${m.output_price_per_million.toFixed(2)} per 1M)
                       </option>
                     ))
                   )}
