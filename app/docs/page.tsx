@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import {
   Zap,
@@ -17,11 +17,20 @@ import {
   Globe,
   Layers,
   FileCode,
+  Key,
+  Database,
   Check,
 } from "lucide-react";
 
 export default function DocsPage() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [baseUrl, setBaseUrl] = useState<string>("https://meterix.app");
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      setBaseUrl(window.location.origin);
+    }
+  }, []);
 
   const copyToClipboard = (code: string, id: string) => {
     navigator.clipboard.writeText(code);
@@ -80,7 +89,7 @@ async function runAgent() {
 
 runAgent();`;
 
-  const curlSnippet = `curl -X POST https://meterix.app/api/v1/telemetry \\
+  const curlSnippet = `curl -X POST ${baseUrl}/api/v1/telemetry \\
   -H "Authorization: Bearer mx_live_your_api_key_here" \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -93,6 +102,11 @@ runAgent();`;
     }
   }'`;
 
+  const modelsCurlSnippet = `curl -X GET ${baseUrl}/api/models`;
+
+  const keysCurlSnippet = `curl -X GET ${baseUrl}/api/keys \\
+  -H "Authorization: Bearer <YOUR_SESSION_TOKEN>"`;
+
   const jsonResponseSnippet = `{
   "success": true,
   "log_id": "c5cf61ee-6ff6-4f73-a1e7-e75ca9601324",
@@ -104,6 +118,25 @@ runAgent();`;
   "is_estimated": false,
   "currency": "USD",
   "timestamp": "2026-08-15T10:23:00.000Z"
+}`;
+
+  const modelsResponseSnippet = `{
+  "models": [
+    {
+      "model_name": "gpt-4o",
+      "provider": "openai",
+      "input_price_per_million": 2.5,
+      "output_price_per_million": 10.0,
+      "is_active": true
+    },
+    {
+      "model_name": "claude-3-5-sonnet",
+      "provider": "anthropic",
+      "input_price_per_million": 3.0,
+      "output_price_per_million": 15.0,
+      "is_active": true
+    }
+  ]
 }`;
 
   return (
@@ -433,6 +466,99 @@ runAgent();`;
             <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-xs w-full">
               <div className="font-bold font-mono text-rose-400">429 Quota Exceeded</div>
               <p className="text-[11px] text-zinc-400 mt-1">Monthly log quota limit reached for organization plan tier.</p>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Section 4: Models Endpoint ──────────────────────── */}
+        <section id="models-api" className="bento-card p-6 space-y-5 w-full border border-zinc-800/80 bg-zinc-900/90">
+          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+            <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2 font-sans tracking-tight">
+              <Database className="h-4.5 w-4.5 text-emerald-400" />
+              4. Active Models Endpoint
+            </h2>
+            <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-bold">
+              GET /api/models
+            </span>
+          </div>
+
+          <p className="text-xs text-zinc-400 font-sans">
+            Returns all active LLM model pricing configurations filtered strictly by <code className="text-zinc-200 font-mono">is_active = true</code>.
+          </p>
+
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-sans">Example Request</h3>
+            <div className="relative bg-[#0c0d0e] border border-zinc-800 rounded-lg p-4 font-mono text-xs text-zinc-300 w-full max-w-full overflow-x-auto">
+              <button
+                onClick={() => copyToClipboard(modelsCurlSnippet, "models_curl")}
+                className="absolute right-3 top-3 p-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
+                title="Copy cURL snippet"
+              >
+                {copiedId === "models_curl" ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+              <pre className="text-zinc-200 leading-relaxed">{modelsCurlSnippet}</pre>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-sans">Sample Response</h3>
+            <div className="relative bg-[#0c0d0e] border border-zinc-800 rounded-lg p-4 font-mono text-xs text-emerald-400 w-full max-w-full overflow-x-auto">
+              <button
+                onClick={() => copyToClipboard(modelsResponseSnippet, "models_res")}
+                className="absolute right-3 top-3 p-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
+                title="Copy JSON response"
+              >
+                {copiedId === "models_res" ? (
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+              <pre className="leading-relaxed">{modelsResponseSnippet}</pre>
+            </div>
+          </div>
+        </section>
+
+        {/* ── Section 5: API Keys Endpoint ────────────────────── */}
+        <section id="keys-api" className="bento-card p-6 space-y-5 w-full border border-zinc-800/80 bg-zinc-900/90">
+          <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
+            <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2 font-sans tracking-tight">
+              <Key className="h-4.5 w-4.5 text-amber-400" />
+              5. API Key Management Endpoints
+            </h2>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700 font-bold">
+                GET /api/keys
+              </span>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700 font-bold">
+                POST /api/keys
+              </span>
+            </div>
+          </div>
+
+          <p className="text-xs text-zinc-400 font-sans">
+            Lists or generates secret API keys for authenticated dashboard users. Newly generated keys format as <code className="text-amber-300 font-mono">mx_live_&lt;random_32_chars&gt;</code> and are stored using SHA-256 hashes (<code className="text-zinc-200 font-mono">key_hash</code>).
+          </p>
+
+          <div className="space-y-2">
+            <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-sans">Example List Keys Request</h3>
+            <div className="relative bg-[#0c0d0e] border border-zinc-800 rounded-lg p-4 font-mono text-xs text-zinc-300 w-full max-w-full overflow-x-auto">
+              <button
+                onClick={() => copyToClipboard(keysCurlSnippet, "keys_curl")}
+                className="absolute right-3 top-3 p-1.5 rounded-md bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-100 transition-colors shrink-0"
+                title="Copy cURL snippet"
+              >
+                {copiedId === "keys_curl" ? (
+                  <CheckCircle2 className="h-4 w-4 text-amber-400" />
+                ) : (
+                  <Copy className="h-4 w-4" />
+                )}
+              </button>
+              <pre className="text-zinc-200 leading-relaxed">{keysCurlSnippet}</pre>
             </div>
           </div>
         </section>

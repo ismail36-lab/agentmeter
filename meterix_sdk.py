@@ -19,10 +19,13 @@ class Meterix:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        endpoint: str = "http://localhost:3000/api/v1/telemetry",
+        endpoint: Optional[str] = None,
     ):
         self.api_key = api_key or os.environ.get("METERIX_API_KEY") or os.environ.get("AGENTMETER_API_KEY") or "mx_test_sk_9918237192"
-        self.endpoint = endpoint
+        env_endpoint = os.environ.get("METERIX_ENDPOINT") or os.environ.get("NEXT_PUBLIC_APP_URL")
+        if env_endpoint and not env_endpoint.endswith("/api/v1/telemetry"):
+            env_endpoint = f"{env_endpoint.rstrip('/')}/api/v1/telemetry"
+        self.endpoint = endpoint or env_endpoint or "http://localhost:3000/api/v1/telemetry"
 
     def log_usage(
         self,
