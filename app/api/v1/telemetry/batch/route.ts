@@ -152,21 +152,25 @@ function computeCost(
   cachedTokens: number,
   cacheCreationTokens: number
 ): { cost: number; cacheSavings: number } {
-  const inputCPT = pricing.input_price_per_million / 1_000_000;
-  const outputCPT = pricing.output_price_per_million / 1_000_000;
+  const inputRate = pricing.input_price_per_million / 1_000_000;
+  const outputRate = pricing.output_price_per_million / 1_000_000;
   const cacheReadMultiplier = pricing.provider === "anthropic" ? 0.10 : 0.50;
+  const cacheReadRate = inputRate * cacheReadMultiplier;
+  const cacheWriteRate = inputRate * 1.25;
 
-  const validCached = Math.min(pTokens, Math.max(0, cachedTokens));
-  const uncachedInput = Math.max(0, pTokens - validCached);
+  const safeCached = Math.max(0, cachedTokens);
+  const safeCreation = Math.max(0, cacheCreationTokens);
+  const regularTokens = Math.max(0, pTokens - safeCached - safeCreation);
 
   const cost = Number(
-    (uncachedInput * inputCPT +
-      validCached * inputCPT * cacheReadMultiplier +
-      cacheCreationTokens * inputCPT * 1.25 +
-      cTokens * outputCPT
+    (
+      regularTokens * inputRate +
+      safeCached * cacheReadRate +
+      safeCreation * cacheWriteRate +
+      cTokens * outputRate
     ).toFixed(6)
   );
-  const cacheSavings = Number((validCached * inputCPT * (1 - cacheReadMultiplier)).toFixed(6));
+  const cacheSavings = Number((safeCached * (inputRate - cacheReadRate)).toFixed(6));
   return { cost, cacheSavings };
 }
 

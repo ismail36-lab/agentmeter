@@ -293,48 +293,50 @@ export async function POST(req: NextRequest) {
       isEstimated = false;
       provider = activePricing.provider || provider;
 
-      const inputCostPerToken = activePricing.input_price_per_million / 1_000_000;
-      const outputCostPerToken = activePricing.output_price_per_million / 1_000_000;
+      const inputRate = activePricing.input_price_per_million / 1_000_000;
+      const outputRate = activePricing.output_price_per_million / 1_000_000;
 
       const cacheReadMultiplier = provider === "anthropic" ? 0.10 : 0.50;
-      const validCachedTokens = Math.min(pTokens, Math.max(0, cachedTokens));
-      const uncachedInputTokens = Math.max(0, pTokens - validCachedTokens);
+      const cacheReadRate = inputRate * cacheReadMultiplier;
+      const cacheWriteRate = inputRate * 1.25;
 
-      const uncachedInputCost = uncachedInputTokens * inputCostPerToken;
-      const cacheReadCost = validCachedTokens * inputCostPerToken * cacheReadMultiplier;
-      const cacheCreationCost = cacheCreationTokens * inputCostPerToken * 1.25;
-      const outputCost = cTokens * outputCostPerToken;
+      const safeCached = Math.max(0, cachedTokens);
+      const safeCreation = Math.max(0, cacheCreationTokens);
+      const regularTokens = Math.max(0, pTokens - safeCached - safeCreation);
 
-      const calculatedCost = uncachedInputCost + cacheReadCost + cacheCreationCost + outputCost;
+      const calculatedCost =
+        (regularTokens * inputRate) +
+        (safeCached * cacheReadRate) +
+        (safeCreation * cacheWriteRate) +
+        (cTokens * outputRate);
+
       roundedCost = Number(calculatedCost.toFixed(6));
-
-      cacheSavingsUSD = Number(
-        (validCachedTokens * inputCostPerToken * (1 - cacheReadMultiplier)).toFixed(6)
-      );
+      cacheSavingsUSD = Number((safeCached * (inputRate - cacheReadRate)).toFixed(6));
     } else if (fallbackPricing) {
       // Deprecated / inactive model (cost calculated using last-known rate)
       isEstimated = true;
       warning = "model deprecated or unrecognized, cost is an estimate";
       provider = fallbackPricing.provider || provider;
 
-      const inputCostPerToken = fallbackPricing.input_price_per_million / 1_000_000;
-      const outputCostPerToken = fallbackPricing.output_price_per_million / 1_000_000;
+      const inputRate = fallbackPricing.input_price_per_million / 1_000_000;
+      const outputRate = fallbackPricing.output_price_per_million / 1_000_000;
 
       const cacheReadMultiplier = provider === "anthropic" ? 0.10 : 0.50;
-      const validCachedTokens = Math.min(pTokens, Math.max(0, cachedTokens));
-      const uncachedInputTokens = Math.max(0, pTokens - validCachedTokens);
+      const cacheReadRate = inputRate * cacheReadMultiplier;
+      const cacheWriteRate = inputRate * 1.25;
 
-      const uncachedInputCost = uncachedInputTokens * inputCostPerToken;
-      const cacheReadCost = validCachedTokens * inputCostPerToken * cacheReadMultiplier;
-      const cacheCreationCost = cacheCreationTokens * inputCostPerToken * 1.25;
-      const outputCost = cTokens * outputCostPerToken;
+      const safeCached = Math.max(0, cachedTokens);
+      const safeCreation = Math.max(0, cacheCreationTokens);
+      const regularTokens = Math.max(0, pTokens - safeCached - safeCreation);
 
-      const calculatedCost = uncachedInputCost + cacheReadCost + cacheCreationCost + outputCost;
+      const calculatedCost =
+        (regularTokens * inputRate) +
+        (safeCached * cacheReadRate) +
+        (safeCreation * cacheWriteRate) +
+        (cTokens * outputRate);
+
       roundedCost = Number(calculatedCost.toFixed(6));
-
-      cacheSavingsUSD = Number(
-        (validCachedTokens * inputCostPerToken * (1 - cacheReadMultiplier)).toFixed(6)
-      );
+      cacheSavingsUSD = Number((safeCached * (inputRate - cacheReadRate)).toFixed(6));
     } else {
       // Unrecognized model (cost calculated using explicit cost or standard default fallback rate)
       isEstimated = true;

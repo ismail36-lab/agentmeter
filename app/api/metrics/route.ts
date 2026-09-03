@@ -97,6 +97,22 @@ export async function GET(req: NextRequest) {
     const totalTokens = userLogs.reduce((acc, curr) => acc + getLogTokens(curr), 0);
     const totalRequests = userLogs.length;
 
+    // Fetch active and historical model pricing for accurate caching savings calculation
+    const { data: pricingRows } = await supabaseAdmin
+      .from("model_pricing")
+      .select("model, model_name, provider, input_price_per_million");
+
+    const pricingRatesMap: Record<string, { inputRate: number; provider: string }> = {};
+    (pricingRows ?? []).forEach((row: any) => {
+      const key = String(row.model || row.model_name || "").toLowerCase().trim();
+      if (key) {
+        pricingRatesMap[key] = {
+          inputRate: Number(row.input_price_per_million ?? 0) / 1_000_000,
+          provider: String(row.provider || "").toLowerCase(),
+        };
+      }
+    });
+
     // Prompt Caching metrics
     let totalCachedTokens = 0;
     let totalInputTokens = 0;
@@ -105,10 +121,18 @@ export async function GET(req: NextRequest) {
     userLogs.forEach((log) => {
       const input = Number(log.input_tokens ?? log.prompt_tokens ?? 0);
       const cached = Number(log.cached_tokens ?? log.metadata?.cached_tokens ?? 0);
+      const modelKey = String(log.model || "").toLowerCase().trim();
+      const pricing = pricingRatesMap[modelKey];
+      const provider = pricing?.provider || String(log.provider || "").toLowerCase();
+
+      const inputRate = pricing?.inputRate ?? (provider === "anthropic" ? 3.0 / 1_000_000 : 2.5 / 1_000_000);
+      const cacheReadMultiplier = provider === "anthropic" ? 0.10 : 0.50;
+      const cacheReadRate = inputRate * cacheReadMultiplier;
+      const savingsPerToken = inputRate - cacheReadRate;
+
       totalInputTokens += input;
       totalCachedTokens += cached;
-      const rate = (log.provider || "").toLowerCase() === "anthropic" ? 0.000003 * 0.90 : 0.0000025 * 0.50;
-      totalSavingsUSD += cached * rate;
+      totalSavingsUSD += cached * savingsPerToken;
     });
 
     const cacheHitRate = totalInputTokens > 0 ? Number(((totalCachedTokens / totalInputTokens) * 100).toFixed(1)) : 0;
