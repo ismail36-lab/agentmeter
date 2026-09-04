@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { dispatchWebhookAlert } from "@/lib/webhooks";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -399,6 +400,14 @@ export async function POST(req: NextRequest) {
       const newSpend = Number((currentSpend + totalBatchSpend).toFixed(6));
 
       if (budgetCap !== null && budgetCap > 0 && newSpend > budgetCap) {
+        dispatchWebhookAlert({
+          event: "budget_exceeded",
+          apiKeyName: apiKeyRecord.name || "API Key",
+          currentSpend: newSpend,
+          budgetCap,
+          userId,
+        }).catch(() => {/* silent */});
+
         if (action === "revoke_key") {
           await supabaseAdmin
             .from("api_keys")
@@ -423,6 +432,16 @@ export async function POST(req: NextRequest) {
           );
         }
       } else {
+        if (budgetCap !== null && budgetCap > 0 && newSpend >= budgetCap * 0.8 && currentSpend < budgetCap * 0.8) {
+          dispatchWebhookAlert({
+            event: "budget_alert",
+            apiKeyName: apiKeyRecord.name || "API Key",
+            currentSpend: newSpend,
+            budgetCap,
+            userId,
+          }).catch(() => {/* silent */});
+        }
+
         await supabaseAdmin
           .from("api_keys")
           .update({ current_period_spend_usd: newSpend })

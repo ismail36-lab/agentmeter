@@ -37,6 +37,8 @@ import { UsageTrendChart } from "@/components/charts/UsageTrendChart";
 import { ModelDistributionChart } from "@/components/charts/ModelDistributionChart";
 import { ApiKeyManagement } from "@/components/ApiKeyManagement";
 import { SessionRollups } from "@/components/SessionRollups";
+import { CustomerProfitability } from "@/components/CustomerProfitability";
+import { WebhookManagement } from "@/components/WebhookManagement";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -1043,6 +1045,12 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
+        {/* ── Customer Profitability & Stripe Margin Tracking Bento View ───────── */}
+        <CustomerProfitability />
+
+        {/* ── Slack & Discord Webhook Integration Management ──────────────────── */}
+        <WebhookManagement />
 
         {/* ── Multi-Call Agent Session Rollups Bento View ───────── */}
         <SessionRollups />

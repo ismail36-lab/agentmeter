@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { dispatchWebhookAlert } from "@/lib/webhooks";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -368,6 +369,15 @@ export async function POST(req: NextRequest) {
       const newSpend = Number((currentSpend + roundedCost).toFixed(6));
 
       if (budgetCap !== null && budgetCap > 0 && newSpend > budgetCap) {
+        // Trigger background webhook notification
+        dispatchWebhookAlert({
+          event: "budget_exceeded",
+          apiKeyName: apiKeyRecord.name || "API Key",
+          currentSpend: newSpend,
+          budgetCap,
+          userId,
+        }).catch(() => {/* silent */});
+
         if (action === "revoke_key") {
           // Suspend API key instantly
           await supabaseAdmin
@@ -394,6 +404,17 @@ export async function POST(req: NextRequest) {
           );
         }
       } else {
+        // Check if 80%+ threshold warning alert should fire
+        if (budgetCap !== null && budgetCap > 0 && newSpend >= budgetCap * 0.8 && currentSpend < budgetCap * 0.8) {
+          dispatchWebhookAlert({
+            event: "budget_alert",
+            apiKeyName: apiKeyRecord.name || "API Key",
+            currentSpend: newSpend,
+            budgetCap,
+            userId,
+          }).catch(() => {/* silent */});
+        }
+
         // Within budget cap: update current_period_spend_usd
         await supabaseAdmin
           .from("api_keys")
