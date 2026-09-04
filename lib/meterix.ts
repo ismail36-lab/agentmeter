@@ -16,11 +16,45 @@ export interface LogUsageParams {
   promptTokens: number;
   completionTokens: number;
   cachedTokens?: number;
+  sessionId?: string;
+  session_id?: string;
   metadata?: Record<string, unknown>;
 }
 
 export interface QueuedLog extends LogUsageParams {
   queuedAt: number;
+}
+
+export class MeterixSession {
+  readonly #client: MeterixClient;
+  readonly sessionId: string;
+
+  constructor(client: MeterixClient, sessionId: string) {
+    this.#client = client;
+    this.sessionId = sessionId;
+  }
+
+  /**
+   * Log telemetry usage for this session. Automatically attaches session_id to the event.
+   */
+  logUsage(params: LogUsageParams): { queued: true } {
+    const sessionId = this.sessionId;
+    const existingMeta = params.metadata ?? {};
+    return this.#client.logUsage({
+      ...params,
+      sessionId,
+      session_id: sessionId,
+      metadata: {
+        session_id: sessionId,
+        ...existingMeta,
+      },
+    });
+  }
+
+  /** Flush all queued logs for the underlying client */
+  async flush(): Promise<void> {
+    await this.#client.flush();
+  }
 }
 
 export interface MeterixClientOptions {
@@ -89,6 +123,14 @@ export class MeterixClient {
   }
 
   /**
+   * Create a scoped session logger for multi-call agent tasks.
+   * All events logged via this session instance automatically include `session_id`.
+   */
+  session(sessionId: string): MeterixSession {
+    return new MeterixSession(this, sessionId);
+  }
+
+  /**
    * Queue a telemetry log. Returns immediately — never blocks.
    * @returns `{ queued: true }` on success
    */
@@ -140,12 +182,19 @@ export class MeterixClient {
 
   async #sendLog(log: QueuedLog): Promise<void> {
     try {
+      const sessionId = log.sessionId ?? log.session_id ?? (log.metadata as any)?.session_id;
+      const metadata = {
+        ...(log.metadata ?? {}),
+        ...(sessionId ? { session_id: sessionId } : {}),
+      };
+
       const payload = {
         model: log.model,
         prompt_tokens: log.promptTokens,
         completion_tokens: log.completionTokens,
         ...(log.cachedTokens !== undefined && { cached_tokens: log.cachedTokens }),
-        metadata: log.metadata ?? {},
+        ...(sessionId && { session_id: sessionId }),
+        metadata,
       };
 
       await fetch(this.#endpoint, {

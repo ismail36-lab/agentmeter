@@ -196,6 +196,9 @@ export async function POST(req: NextRequest) {
     const endUserTag = String(
       metadata?.user_id ?? body.end_user_id ?? body.client_id ?? userId ?? "anonymous"
     );
+    const sessionIdTag = String(
+      body.session_id ?? body.sessionId ?? metadata?.session_id ?? metadata?.sessionId ?? ""
+    ).trim() || null;
 
     if (!model || (prompt_tokens === undefined && input_tokens === undefined)) {
       return NextResponse.json(
@@ -413,7 +416,12 @@ export async function POST(req: NextRequest) {
       environment: envTag,
       agent_name: agentTag || "default-agent",
       end_user_id: endUserTag,
-      metadata: metadata || { environment: envTag, agent_name: agentTag || "default-agent" },
+      session_id: sessionIdTag,
+      metadata: metadata || {
+        environment: envTag,
+        agent_name: agentTag || "default-agent",
+        ...(sessionIdTag && { session_id: sessionIdTag }),
+      },
       total_cost_usd: roundedCost,
       is_estimated: isEstimated,
       latency_ms: Number(body.latency_ms || body.latency) || 100,
@@ -478,6 +486,7 @@ export async function POST(req: NextRequest) {
         ...(budgetWarning && { budget_warning: budgetWarning }),
         environment: envTag,
         agent_name: agentTag || "default-agent",
+        ...(sessionIdTag && { session_id: sessionIdTag }),
         currency: "USD",
         timestamp: nowIso,
       },

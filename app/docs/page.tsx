@@ -46,7 +46,22 @@ export default function DocsPage() {
 # Initialize Meterix client with your secret API key
 meter = Meterix(api_key="mx_live_your_api_key_here")
 
-# 1. Log telemetry payload manually after an LLM call
+# 1. Multi-call Agent Session helper (aggregates multi-step workflows)
+session = meter.session("sess_task_99214")
+session.log_usage(
+    model="gpt-4o",
+    prompt_tokens=1250,
+    completion_tokens=480,
+    metadata={"agent_name": "ResearchAgent", "step": "planning"}
+)
+session.log_usage(
+    model="claude-3-5-sonnet",
+    prompt_tokens=2100,
+    completion_tokens=850,
+    metadata={"agent_name": "ResearchAgent", "step": "synthesis"}
+)
+
+# 2. Or log telemetry payload manually
 response = meter.log_usage(
     model="gpt-4o",
     prompt_tokens=1250,
@@ -57,9 +72,8 @@ response = meter.log_usage(
         "user_id": "usr_99182"
     }
 )
-print("Meterix Ingestion Status:", response)
 
-# 2. Or use the trace context manager to automatically track latency
+# 3. Or use the trace context manager to automatically track latency
 with meter.trace(model="claude-3-5-sonnet", metadata={"workflow": "code_review"}) as t:
     # Perform your LLM completion call here
     pass`;
@@ -75,27 +89,32 @@ const meter = new MeterixClient({
   maxBufferSize: 50,                   // force flush when buffer hits 50
 });
 
-async function runAgent() {
-  // logUsage() returns immediately — { queued: true }
-  // Network request happens in the background batch flush
-  const queued = meter.logUsage({
-    model: "gpt-4o",
-    promptTokens: 1500,
-    completionTokens: 450,
-    metadata: {
-      environment: "production",
-      agent_name: "SupportAgent",
-      session_id: "sess_881923",
-    },
+async function runMultiCallAgentTask() {
+  // Create a scoped session instance for multi-call agent tasks
+  // All logUsage events from this session automatically attach session_id
+  const session = meter.session("sess_agent_task_881923");
+
+  // Step 1: Initial query planning
+  session.logUsage({
+    model: "gpt-4o-mini",
+    promptTokens: 800,
+    completionTokens: 250,
+    metadata: { agent_name: "PlannerAgent", environment: "production" },
   });
 
-  console.log(queued); // { queued: true }
+  // Step 2: Complex reasoning & code generation
+  session.logUsage({
+    model: "gpt-4o",
+    promptTokens: 3200,
+    completionTokens: 1100,
+    metadata: { agent_name: "CoderAgent", environment: "production" },
+  });
 
   // Optional: manually flush all buffered logs immediately
-  await meter.flush();
+  await session.flush();
 }
 
-runAgent();`;
+runMultiCallAgentTask();`;
 
   const vercelSnippet = `// app/api/route.ts — Next.js Route Handler (Vercel Edge / Serverless)
 import { waitUntil } from "@vercel/functions";

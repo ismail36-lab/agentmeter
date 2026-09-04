@@ -33,6 +33,7 @@ class Meterix:
         prompt_tokens: int,
         completion_tokens: int,
         metadata: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Sends telemetry usage log to Meterix server.
@@ -41,14 +42,21 @@ class Meterix:
         :param prompt_tokens: Count of prompt tokens used
         :param completion_tokens: Count of completion tokens generated
         :param metadata: Optional dictionary of metadata tags
+        :param session_id: Optional session identifier for multi-call agent tasks
         :return: JSON response dict from Meterix server
         """
+        meta = metadata or {}
+        if session_id:
+            meta["session_id"] = session_id
+
         payload = {
             "model": model,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
-            "metadata": metadata or {},
+            "metadata": meta,
         }
+        if session_id:
+            payload["session_id"] = session_id
 
         headers = {
             "Content-Type": "application/json",
@@ -74,11 +82,40 @@ class Meterix:
         except Exception as e:
             return {"error": "Unexpected Error", "details": str(e)}
 
+    def session(self, session_id: str) -> "MeterixSession":
+        """
+        Create a scoped session logger instance for multi-call agent tasks.
+        """
+        return MeterixSession(self, session_id=session_id)
+
     def trace(self, model: str, metadata: Optional[Dict[str, Any]] = None):
         """
         Context manager to measure execution time and log LLM usage.
         """
         return MeterixTrace(self, model=model, metadata=metadata)
+
+
+class MeterixSession:
+    """Scoped session helper for multi-step / multi-call agent workflows"""
+
+    def __init__(self, client: Meterix, session_id: str):
+        self.client = client
+        self.session_id = session_id
+
+    def log_usage(
+        self,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        return self.client.log_usage(
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            metadata=metadata,
+            session_id=self.session_id,
+        )
 
 
 class MeterixTrace:

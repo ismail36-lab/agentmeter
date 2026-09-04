@@ -36,6 +36,7 @@ import {
 import { UsageTrendChart } from "@/components/charts/UsageTrendChart";
 import { ModelDistributionChart } from "@/components/charts/ModelDistributionChart";
 import { ApiKeyManagement } from "@/components/ApiKeyManagement";
+import { SessionRollups } from "@/components/SessionRollups";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -1042,6 +1043,9 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
+        {/* ── Multi-Call Agent Session Rollups Bento View ───────── */}
+        <SessionRollups />
 
         {/* ── API Key Management Bento Card ─────────────────── */}
         <ApiKeyManagement

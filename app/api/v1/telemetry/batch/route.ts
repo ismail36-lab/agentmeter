@@ -184,6 +184,8 @@ interface BatchEvent {
   cached_tokens?: number;
   cache_creation_tokens?: number;
   latency_ms?: number;
+  session_id?: string;
+  sessionId?: string;
   metadata?: Record<string, unknown>;
   cost?: number;
   total_cost_usd?: number;
@@ -205,7 +207,8 @@ interface EventResult {
 async function processEvent(
   event: BatchEvent,
   index: number,
-  userId: string | null
+  userId: string | null,
+  batchSessionId: string | null = null
 ): Promise<EventResult> {
   try {
     const { model, metadata } = event;
@@ -223,6 +226,9 @@ async function processEvent(
     ).toLowerCase();
     const agentTag = String((metadata as any)?.agent_name ?? "default-agent");
     const endUserTag = String((metadata as any)?.user_id ?? userId ?? "anonymous");
+    const sessionId = String(
+      event.session_id ?? event.sessionId ?? batchSessionId ?? (metadata as any)?.session_id ?? (metadata as any)?.sessionId ?? ""
+    ).trim() || null;
     let provider = event.provider ?? "custom";
 
     const { active: activePricing, fallback: fallbackPricing } =
@@ -266,7 +272,8 @@ async function processEvent(
       environment: envTag,
       agent_name: agentTag,
       end_user_id: endUserTag,
-      metadata: metadata ?? { environment: envTag, agent_name: agentTag },
+      session_id: sessionId,
+      metadata: metadata ?? { environment: envTag, agent_name: agentTag, ...(sessionId && { session_id: sessionId }) },
       total_cost_usd: roundedCost,
       is_estimated: isEstimated,
       latency_ms: Number(event.latency_ms ?? 0) || 0,
@@ -355,6 +362,7 @@ export async function POST(req: NextRequest) {
     // 4. Parse and validate body
     const body = await req.json();
     const events: BatchEvent[] = body?.events;
+    const batchSessionId = String(body?.session_id ?? body?.sessionId ?? "").trim() || null;
 
     if (!Array.isArray(events) || events.length === 0) {
       return NextResponse.json(
@@ -372,7 +380,7 @@ export async function POST(req: NextRequest) {
 
     // 5. Process all events in parallel — partial failures don't abort the batch
     const results: EventResult[] = await Promise.all(
-      events.map((event, index) => processEvent(event, index, userId))
+      events.map((event, index) => processEvent(event, index, userId, batchSessionId))
     );
 
     const processed = results.filter((r) => r.success).length;
