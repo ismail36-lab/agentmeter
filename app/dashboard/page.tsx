@@ -39,6 +39,7 @@ import { ApiKeyManagement } from "@/components/ApiKeyManagement";
 import { SessionRollups } from "@/components/SessionRollups";
 import { CustomerProfitability } from "@/components/CustomerProfitability";
 import { WebhookManagement } from "@/components/WebhookManagement";
+import { ProjectRetentionSettings } from "@/components/ProjectRetentionSettings";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -139,6 +140,9 @@ export default function Dashboard() {
   // Auth State
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  // Default project ID — in a single-project setup the user's own ID is used as the project scope.
+  // Replace with a project selector when multi-project support is added.
+  const [projectId, setProjectId] = useState<string | null>(null);
 
   // Data Loading States
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
@@ -441,6 +445,8 @@ export default function Dashboard() {
       if (user) {
         setUserId(user.id);
         setUserEmail(user.email ?? null);
+        // Use the authenticated user's ID as the default project scope.
+        setProjectId(user.id);
         fetchApiKeys();
         fetchMetrics();
         fetchLogs(user.id);
@@ -1051,6 +1057,13 @@ export default function Dashboard() {
 
         {/* ── Slack & Discord Webhook Integration Management ──────────────────── */}
         <WebhookManagement />
+
+        {/* ── Data Retention Policy Settings ─────────────────────────────────── */}
+        {projectId && (
+          <ProjectRetentionSettings
+            projectId={projectId}
+          />
+        )}
 
         {/* ── Multi-Call Agent Session Rollups Bento View ───────── */}
         <SessionRollups />
