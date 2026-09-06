@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { authorizeRole } from "@/lib/rbac";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -64,11 +65,24 @@ export async function POST(req: NextRequest) {
 
   let name = "Default Key";
   let env: "live" | "test" = "live";
+  let projectId: string | undefined;
   try {
     const body = await req.json();
     if (body?.name) name = String(body.name).slice(0, 80);
     if (body?.environment === "test" || body?.is_test === true) env = "test";
+    if (body?.project_id) projectId = String(body.project_id);
   } catch {}
+
+  // If a projectId is provided, enforce that the caller is at least an admin.
+  if (projectId) {
+    const auth = await authorizeRole(projectId, "admin");
+    if (!auth.authorized) {
+      return NextResponse.json(
+        { error: auth.reason ?? "Forbidden" },
+        { status: 403 }
+      );
+    }
+  }
 
   // Enforce a soft cap of 10 keys per user
   const { count } = await supabaseAdmin

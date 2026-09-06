@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { authorizeRole } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,18 @@ export async function DELETE(
 
   const { searchParams } = new URL(req.url);
   const isHardDelete = searchParams.get("hard") === "true";
+  const projectId = searchParams.get("project_id");
+
+  // If a project scope is provided, ensure the caller holds at least 'admin'.
+  if (projectId) {
+    const auth = await authorizeRole(projectId, "admin");
+    if (!auth.authorized) {
+      return NextResponse.json(
+        { error: auth.reason ?? "Forbidden" },
+        { status: 403 }
+      );
+    }
+  }
 
   let error;
   if (isHardDelete) {
