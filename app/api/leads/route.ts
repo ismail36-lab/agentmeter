@@ -146,8 +146,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // ── Notify sales team ─────────────────────────────────────────────────────
-  await notifySalesTeam(lead);
+  // ── Notify sales team (best-effort — never crash after successful DB write) ──
+  try {
+    await notifySalesTeam(lead);
+  } catch (notifyErr) {
+    console.error("[leads] notifySalesTeam failed (non-fatal):", notifyErr);
+  }
 
   return NextResponse.json(
     {

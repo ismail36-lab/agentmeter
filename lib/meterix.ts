@@ -80,11 +80,25 @@ export class MeterixClient {
   #flushing = false;
 
   constructor(options: MeterixClientOptions = {}) {
-    this.#apiKey =
+    const resolvedApiKey =
       options.apiKey ??
       (typeof process !== "undefined"
         ? process.env.METERIX_API_KEY ?? process.env.AGENTMETER_API_KEY ?? ""
         : "");
+
+    // Deprecation warning for legacy env var
+    if (
+      !options.apiKey &&
+      typeof process !== "undefined" &&
+      !process.env.METERIX_API_KEY &&
+      process.env.AGENTMETER_API_KEY
+    ) {
+      console.warn(
+        "[Meterix] DEPRECATION WARNING: AGENTMETER_API_KEY is deprecated. Please migrate to METERIX_API_KEY."
+      );
+    }
+
+    this.#apiKey = resolvedApiKey;
 
     const envEndpoint =
       typeof process !== "undefined"

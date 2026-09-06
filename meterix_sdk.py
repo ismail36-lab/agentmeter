@@ -21,7 +21,16 @@ class Meterix:
         api_key: Optional[str] = None,
         endpoint: Optional[str] = None,
     ):
-        self.api_key = api_key or os.environ.get("METERIX_API_KEY") or os.environ.get("AGENTMETER_API_KEY") or "mx_test_sk_9918237192"
+        resolved_key = api_key or os.environ.get("METERIX_API_KEY") or os.environ.get("AGENTMETER_API_KEY") or "mx_test_sk_9918237192"
+        # Deprecation warning for legacy env var
+        if not api_key and not os.environ.get("METERIX_API_KEY") and os.environ.get("AGENTMETER_API_KEY"):
+            import warnings
+            warnings.warn(
+                "AGENTMETER_API_KEY is deprecated. Please migrate to METERIX_API_KEY.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self.api_key = resolved_key
         env_endpoint = os.environ.get("METERIX_ENDPOINT") or os.environ.get("NEXT_PUBLIC_APP_URL")
         if env_endpoint and not env_endpoint.endswith("/api/v1/telemetry"):
             env_endpoint = f"{env_endpoint.rstrip('/')}/api/v1/telemetry"
