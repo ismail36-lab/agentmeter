@@ -4,6 +4,7 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { TalkToSalesTrigger } from "@/components/TalkToSalesModal";
 import {
   Check,
   Zap,
@@ -14,6 +15,7 @@ import {
   Webhook,
   HelpCircle,
   Loader2,
+  Building2,
 } from "lucide-react";
 
 const getPlans = (billingCycle: "monthly" | "annual") => [
@@ -295,6 +297,49 @@ export default function Home() {
               </div>
             ))}
           </div>
+
+          {/* ── Enterprise Card ───────────────────────────────── */}
+          <div className="mt-6 w-full max-w-3xl mx-auto rounded-xl border border-zinc-800/60 bg-gradient-to-r from-zinc-900 via-indigo-950/20 to-zinc-900 p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
+            <div className="flex items-start gap-4">
+              <div className="p-2.5 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">
+                <Building2 className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-sm font-semibold text-zinc-50">Enterprise</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+                    CUSTOM
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 leading-relaxed max-w-md">
+                  SSO &amp; SAML, custom data retention, dedicated infrastructure, SLA guarantees,
+                  RBAC, and white-glove onboarding for teams with 200+ engineers.
+                </p>
+                <ul className="flex flex-wrap gap-x-4 gap-y-1 mt-2.5 text-[11px] font-mono text-zinc-500">
+                  {["Custom log volume", "365-day retention", "SAML SSO", "Dedicated support", "Custom SLA"].map((f) => (
+                    <li key={f} className="flex items-center gap-1">
+                      <Check className="h-2.5 w-2.5 text-indigo-400 shrink-0" />
+                      {f}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+              <TalkToSalesTrigger
+                id="enterprise-card-talk-to-sales-btn"
+                variant="primary"
+                label="Talk to Sales"
+                context="Enterprise Plan"
+              />
+              <TalkToSalesTrigger
+                id="enterprise-card-get-quote-btn"
+                variant="secondary"
+                label="Get a Quote"
+                context="Custom Enterprise Pricing"
+              />
+            </div>
+          </div>
         </div>
       </section>
 
@@ -388,6 +433,22 @@ export default function Home() {
               </div>
             </div>
           ))}
+        </div>
+
+        {/* ── Sales CTA below FAQ ── */}
+        <div className="mt-8 flex flex-col sm:flex-row items-center justify-between gap-4 rounded-xl border border-indigo-900/50 bg-indigo-950/30 px-6 py-5">
+          <div>
+            <p className="text-sm font-semibold text-zinc-100">Still have questions?</p>
+            <p className="text-xs text-zinc-400 mt-0.5">
+              Our sales team can walk you through pricing, custom plans, and enterprise features.
+            </p>
+          </div>
+          <TalkToSalesTrigger
+            id="faq-talk-to-sales-btn"
+            variant="primary"
+            label="Talk to Sales"
+            context="General Enquiry"
+          />
         </div>
       </section>
 
