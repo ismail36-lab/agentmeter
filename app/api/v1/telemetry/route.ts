@@ -156,8 +156,8 @@ export async function POST(req: NextRequest) {
       console.warn("Quota usage count notice:", err);
     }
 
-    // Enforce limit for free-tier users (count >= 1000) before any token/cost calculation or DB insert
-    if (totalLogsCount >= 1000 && userPlan === "free") {
+    // Enforce limit for free-tier users (count >= 5000) before any token/cost calculation or DB insert
+    if (totalLogsCount >= 5000 && userPlan === "free") {
       return NextResponse.json(
         { error: "Monthly log limit reached" },
         { status: 429, headers: getCorsHeaders() }

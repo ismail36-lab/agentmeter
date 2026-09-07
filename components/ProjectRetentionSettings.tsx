@@ -1,18 +1,18 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Database, CheckCircle2, AlertCircle, Loader2, Clock, ShieldCheck } from "lucide-react";
+import { Database, CheckCircle2, AlertCircle, Loader2, Clock, ShieldCheck, Lock, Sparkles, Building2 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
-// Types
+// Types & Retention Options
 // ---------------------------------------------------------------------------
 
 const RETENTION_OPTIONS = [
-  { value: 7, label: "7 days", description: "Short-term / debugging" },
-  { value: 30, label: "30 days", description: "Standard" },
-  { value: 60, label: "60 days", description: "Extended" },
-  { value: 90, label: "90 days", description: "Quarterly" },
-  { value: 365, label: "365 days", description: "Annual / compliance" },
+  { value: 7, label: "7 days", description: "Short-term / Free Tier", minPlan: "free" },
+  { value: 30, label: "30 days", description: "Standard Pro Tier", minPlan: "pro" },
+  { value: 60, label: "60 days", description: "Extended (Enterprise)", minPlan: "enterprise" },
+  { value: 90, label: "90 days", description: "Quarterly (Enterprise)", minPlan: "enterprise" },
+  { value: 365, label: "365 days", description: "Annual / Compliance", minPlan: "enterprise" },
 ] as const;
 
 type RetentionValue = (typeof RETENTION_OPTIONS)[number]["value"];
@@ -32,12 +32,13 @@ interface ProjectRetentionSettingsProps {
   /** UUID of the project whose settings we are managing. */
   projectId: string;
   /**
-   * Optional: pass the user's role so the component can disable editing
-   * for non-admin users without an extra API call.
-   * If omitted the component will still work — the server will reject
-   * unauthorised PATCH requests with 403.
+   * User role passed from parent scope (owner, admin, member, viewer).
    */
   userRole?: "owner" | "admin" | "member" | "viewer";
+  /**
+   * User plan passed from parent scope (free, pro, enterprise).
+   */
+  userPlan?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,19 +50,59 @@ function canEdit(role?: string) {
   return role === "owner" || role === "admin" || role === undefined;
 }
 
+/** Check if a retention option is available for the current plan */
+function isOptionAllowedForPlan(optionDays: RetentionValue, plan: string): boolean {
+  const normalizedPlan = (plan || "free").toLowerCase();
+  if (normalizedPlan === "enterprise") return true;
+  if (normalizedPlan === "pro") return optionDays <= 30;
+  // Free plan is strictly capped at 7 days
+  return optionDays <= 7;
+}
+
+/** Get appropriate lock badge label for an option */
+function getLockBadge(optionDays: RetentionValue, plan: string): { label: string; badgeClass: string } | null {
+  if (isOptionAllowedForPlan(optionDays, plan)) return null;
+
+  const normalizedPlan = (plan || "free").toLowerCase();
+  if (normalizedPlan === "free" && optionDays === 30) {
+    return {
+      label: "Upgrade to Pro",
+      badgeClass: "bg-indigo-500/10 text-indigo-400 border-indigo-500/30",
+    };
+  }
+  return {
+    label: "Enterprise Plan Required",
+    badgeClass: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export function ProjectRetentionSettings({
   projectId,
-  userRole,
+  userRole: initialRole,
+  userPlan: initialPlan = "free",
 }: ProjectRetentionSettingsProps) {
   const [settings, setSettings] = useState<ProjectSettings | null>(null);
-  const [selectedDays, setSelectedDays] = useState<RetentionValue>(30);
+  const [activeRole, setActiveRole] = useState<string>(initialRole || "owner");
+  const [activePlan, setActivePlan] = useState<string>(initialPlan);
+
+  const [selectedDays, setSelectedDays] = useState<RetentionValue>(
+    (initialPlan || "free").toLowerCase() === "free" ? 7 : 30
+  );
+
   const [isLoading, setIsLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ type: "idle" });
-  const readonly = !canEdit(userRole);
+
+  const readonly = !canEdit(activeRole);
+
+  // Sync props if provided
+  useEffect(() => {
+    if (initialRole) setActiveRole(initialRole);
+    if (initialPlan) setActivePlan(initialPlan);
+  }, [initialRole, initialPlan]);
 
   // ── Fetch current settings ────────────────────────────────────────────────
   const fetchSettings = useCallback(async () => {
@@ -71,7 +112,6 @@ export function ProjectRetentionSettings({
         cache: "no-store",
       });
       if (!res.ok) {
-        // If 403 → viewer or not a member; surface gracefully
         if (res.status === 403) {
           setSaveStatus({ type: "error", message: "You do not have permission to view these settings." });
         }
@@ -80,17 +120,28 @@ export function ProjectRetentionSettings({
       const data = await res.json();
       const proj: ProjectSettings = data.project;
       setSettings(proj);
-      // Default to the stored value, or 30 days if null
+
+      if (data.userRole) setActiveRole(data.userRole);
+      if (data.userPlan) setActivePlan(data.userPlan);
+
+      const plan = (data.userPlan || activePlan || "free").toLowerCase();
       const stored = proj.retention_days;
+
       if (stored && RETENTION_OPTIONS.some((o) => o.value === stored)) {
-        setSelectedDays(stored as RetentionValue);
+        if (isOptionAllowedForPlan(stored as RetentionValue, plan)) {
+          setSelectedDays(stored as RetentionValue);
+        } else {
+          setSelectedDays(plan === "free" ? 7 : 30);
+        }
+      } else {
+        setSelectedDays(plan === "free" ? 7 : 30);
       }
     } catch (err) {
       console.warn("[ProjectRetentionSettings] fetch error:", err);
     } finally {
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, activePlan]);
 
   useEffect(() => {
     fetchSettings();
@@ -99,6 +150,16 @@ export function ProjectRetentionSettings({
   // ── Save handler ──────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (readonly) return;
+
+    if (!isOptionAllowedForPlan(selectedDays, activePlan)) {
+      const badge = getLockBadge(selectedDays, activePlan);
+      setSaveStatus({
+        type: "error",
+        message: badge?.label ? `${badge.label} to select ${selectedDays} days retention.` : "Plan limit exceeded.",
+      });
+      return;
+    }
+
     setSaveStatus({ type: "saving" });
 
     try {
@@ -118,12 +179,10 @@ export function ProjectRetentionSettings({
         return;
       }
 
-      // Optimistic update of local state
       setSettings((prev) =>
         prev ? { ...prev, retention_days: data.project.retention_days } : prev
       );
-      setSaveStatus({ type: "success", message: "Data retention policy saved." });
-      // Clear success badge after 3 s
+      setSaveStatus({ type: "success", message: "Data retention policy saved successfully." });
       setTimeout(() => setSaveStatus({ type: "idle" }), 3000);
     } catch (err: any) {
       setSaveStatus({
@@ -136,6 +195,7 @@ export function ProjectRetentionSettings({
   // ── Derived values ────────────────────────────────────────────────────────
   const currentOption = RETENTION_OPTIONS.find((o) => o.value === selectedDays);
   const isDirty = settings?.retention_days !== selectedDays;
+  const isFreePlan = (activePlan || "free").toLowerCase() === "free";
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -152,23 +212,31 @@ export function ProjectRetentionSettings({
               <h3 className="text-sm font-semibold text-zinc-100 font-sans tracking-tight">
                 Data Retention Policy
               </h3>
-              {readonly && (
+              {readonly ? (
                 <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-zinc-800 text-zinc-400 border border-zinc-700/60">
                   READ-ONLY
+                </span>
+              ) : isFreePlan ? (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                  7-DAY FREE TIER
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                  PRO TIER UNLOCKED
                 </span>
               )}
             </div>
             <p className="text-xs text-zinc-400 mt-0.5">
-              Configure how long telemetry logs are retained for this project.
+              Configure telemetry log retention period for this project workspace.
             </p>
           </div>
         </div>
 
         {/* Role badge */}
-        {userRole && (
+        {activeRole && (
           <span className="self-start sm:self-auto inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-semibold font-mono bg-zinc-800/80 text-zinc-400 border border-zinc-700/60 uppercase tracking-wider">
             <ShieldCheck className="h-3 w-3 text-indigo-400" />
-            {userRole}
+            {activeRole}
           </span>
         )}
       </div>
@@ -182,53 +250,96 @@ export function ProjectRetentionSettings({
       ) : (
         <>
           {/* Current retention summary */}
-          <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800/60 text-xs font-mono">
-            <Clock className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-            <span className="text-zinc-400">Current policy:</span>
-            <span className="text-zinc-100 font-semibold">
-              {settings?.retention_days != null
-                ? `${settings.retention_days} days`
-                : "Not configured (default 30 days)"}
-            </span>
+          <div className="flex items-center justify-between px-3.5 py-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800/60 text-xs font-mono">
+            <div className="flex items-center gap-2">
+              <Clock className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+              <span className="text-zinc-400">Current policy:</span>
+              <span className="text-zinc-100 font-semibold">
+                {settings?.retention_days != null
+                  ? `${settings.retention_days} days`
+                  : isFreePlan
+                  ? "7 days (Free Default)"
+                  : "30 days (Pro Default)"}
+              </span>
+            </div>
+            {isFreePlan && (
+              <a
+                href="/api/checkout?plan=pro"
+                className="text-[11px] font-sans font-semibold text-indigo-400 hover:text-indigo-300 flex items-center gap-1"
+              >
+                <Sparkles className="h-3 w-3 text-indigo-400" />
+                Upgrade to Pro (30 Days)
+              </a>
+            )}
           </div>
 
           {/* Option grid */}
           <div>
             <label className="block text-xs font-medium text-zinc-400 mb-2.5">
-              Retention Period
+              Select Retention Period
             </label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
               {RETENTION_OPTIONS.map((option) => {
                 const isSelected = selectedDays === option.value;
+                const allowed = isOptionAllowedForPlan(option.value, activePlan);
+                const lockBadge = getLockBadge(option.value, activePlan);
+                const isDisabled = readonly || !allowed;
+
                 return (
-                  <button
+                  <div
                     key={option.value}
-                    id={`retention-option-${option.value}`}
-                    type="button"
-                    disabled={readonly}
-                    onClick={() => setSelectedDays(option.value)}
                     className={`
-                      flex flex-col items-center justify-center p-3 rounded-xl border text-center
-                      transition-all duration-150 font-sans
-                      ${readonly
-                        ? "cursor-not-allowed opacity-50"
+                      relative flex flex-col items-center justify-between p-3.5 rounded-xl border text-center transition-all duration-150 font-sans
+                      ${isDisabled
+                        ? "border-zinc-800/40 bg-zinc-950/20 text-zinc-600 cursor-not-allowed opacity-75"
                         : "cursor-pointer hover:border-indigo-500/50 hover:bg-indigo-500/5"
                       }
-                      ${isSelected
+                      ${isSelected && allowed
                         ? "border-indigo-500/70 bg-indigo-500/10 text-indigo-300 shadow-sm shadow-indigo-500/10"
                         : "border-zinc-800/80 bg-zinc-950/40 text-zinc-400"
                       }
                     `}
-                    aria-pressed={isSelected}
                   >
-                    <span className={`text-base font-bold font-mono ${isSelected ? "text-indigo-300" : "text-zinc-200"}`}>
-                      {option.value}
-                    </span>
-                    <span className="text-[10px] font-medium mt-0.5">days</span>
-                    <span className={`text-[10px] mt-1 ${isSelected ? "text-indigo-400" : "text-zinc-600"}`}>
-                      {option.description}
-                    </span>
-                  </button>
+                    <button
+                      id={`retention-option-${option.value}`}
+                      type="button"
+                      disabled={isDisabled}
+                      onClick={() => allowed && !readonly && setSelectedDays(option.value)}
+                      className="w-full flex flex-col items-center"
+                      aria-pressed={isSelected}
+                    >
+                      <div className="flex items-center gap-1 font-mono">
+                        <span className={`text-base font-bold ${isSelected && allowed ? "text-indigo-300" : "text-zinc-200"}`}>
+                          {option.value}
+                        </span>
+                        <span className="text-[10px] font-medium text-zinc-500">days</span>
+                      </div>
+
+                      <span className={`text-[10px] mt-1 ${isSelected && allowed ? "text-indigo-400" : "text-zinc-500"}`}>
+                        {option.description}
+                      </span>
+                    </button>
+
+                    {/* Lock / Upgrade Badge */}
+                    {lockBadge && (
+                      <div className="mt-2 w-full pt-1.5 border-t border-zinc-800/60">
+                        {lockBadge.label === "Upgrade to Pro" ? (
+                          <a
+                            href="/api/checkout?plan=pro"
+                            className={`inline-flex items-center justify-center gap-1 text-[9px] font-semibold px-2 py-0.5 rounded border transition-colors ${lockBadge.badgeClass}`}
+                          >
+                            <Lock className="h-2.5 w-2.5" />
+                            {lockBadge.label}
+                          </a>
+                        ) : (
+                          <span className={`inline-flex items-center justify-center gap-1 text-[9px] font-semibold px-1.5 py-0.5 rounded border ${lockBadge.badgeClass}`}>
+                            <Building2 className="h-2.5 w-2.5" />
+                            {lockBadge.label}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -240,21 +351,21 @@ export function ProjectRetentionSettings({
               {/* Status message */}
               <div className="text-xs font-sans">
                 {saveStatus.type === "success" && (
-                  <span className="flex items-center gap-1.5 text-emerald-400">
+                  <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
                     <CheckCircle2 className="h-3.5 w-3.5" />
                     {saveStatus.message}
                   </span>
                 )}
                 {saveStatus.type === "error" && (
-                  <span className="flex items-center gap-1.5 text-rose-400">
+                  <span className="flex items-center gap-1.5 text-rose-400 font-medium">
                     <AlertCircle className="h-3.5 w-3.5" />
                     {saveStatus.message}
                   </span>
                 )}
                 {saveStatus.type === "idle" && isDirty && (
-                  <span className="text-zinc-500">
-                    Unsaved changes — selected{" "}
-                    <span className="text-zinc-300 font-semibold font-mono">{selectedDays} days</span>
+                  <span className="text-zinc-400">
+                    Unsaved change — selected{" "}
+                    <span className="text-indigo-300 font-semibold font-mono">{selectedDays} days</span>
                     {currentOption ? ` (${currentOption.description})` : ""}
                   </span>
                 )}
@@ -265,7 +376,7 @@ export function ProjectRetentionSettings({
                 id="save-retention-btn"
                 type="button"
                 onClick={handleSave}
-                disabled={saveStatus.type === "saving" || !isDirty}
+                disabled={saveStatus.type === "saving" || !isDirty || !isOptionAllowedForPlan(selectedDays, activePlan)}
                 className="
                   inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium
                   bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-800 disabled:text-zinc-500
@@ -285,9 +396,7 @@ export function ProjectRetentionSettings({
 
           {/* Compliance hint */}
           <p className="text-[11px] text-zinc-600 font-sans leading-relaxed border-t border-zinc-800/60 pt-3">
-            <span className="font-semibold text-zinc-500">Note:</span> Logs older than the selected retention period will be automatically purged by the nightly cleanup job.
-            Changes apply to new data immediately and historic data within 24 hours.
-            Only <span className="text-zinc-400 font-semibold">admin</span> and <span className="text-zinc-400 font-semibold">owner</span> roles may modify this policy.
+            <span className="font-semibold text-zinc-500">Note:</span> Free Tier projects are fixed at 7-day log retention. Upgrade to Pro ($99/mo) to unlock up to 30 days. Logs older than the selected retention period are automatically purged by nightly background cleanup jobs. Only <span className="text-zinc-400 font-semibold">admin</span> and <span className="text-zinc-400 font-semibold">owner</span> roles may update retention policy.
           </p>
         </>
       )}

@@ -140,6 +140,7 @@ export default function Dashboard() {
   // Auth State
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<"owner" | "admin" | "member" | "viewer">("owner");
   // Default project ID — in a single-project setup the user's own ID is used as the project scope.
   // Replace with a project selector when multi-project support is added.
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -209,11 +210,11 @@ export default function Dashboard() {
   }>({
     plan: "free",
     tierName: "Free Sandbox",
-    limit: 1000,
-    limitLabel: "1,000 logs/mo",
+    limit: 5000,
+    limitLabel: "5,000 logs/mo",
     usage: 0,
     percentage: 0,
-    remaining: 1000,
+    remaining: 5000,
   });
   const [isSwitchingPlan, setIsSwitchingPlan] = useState(false);
   const [isLoadingPortal, setIsLoadingPortal] = useState(false);
@@ -1062,6 +1063,8 @@ export default function Dashboard() {
         {projectId && (
           <ProjectRetentionSettings
             projectId={projectId}
+            userRole={userRole}
+            userPlan={planDetails.plan}
           />
         )}
 

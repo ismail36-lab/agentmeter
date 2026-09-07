@@ -57,7 +57,7 @@ export default function PrivacyPage() {
           <div>
             <h2 className="text-lg font-semibold text-zinc-100 mb-2">4. Data Retention</h2>
             <p className="text-zinc-400">
-              Standard Pro tier telemetry logs are retained for 30 days, after which raw logs are automatically purged by automated cleanup background workers.
+              Free Tier telemetry logs are retained for 7 days, and standard Pro tier telemetry logs are retained for up to 30 days, after which raw logs are automatically purged by automated cleanup background workers.
             </p>
           </div>
 

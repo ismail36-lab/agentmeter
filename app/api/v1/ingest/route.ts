@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 // Plan → monthly log limit (mirrors app/api/plan/route.ts)
 const PLAN_LIMITS: Record<string, number> = {
-  free: 1000,
+  free: 5000,
   pro: 250000,
   enterprise: 1000000,
 };

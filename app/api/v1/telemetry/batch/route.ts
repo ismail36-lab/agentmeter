@@ -352,7 +352,7 @@ export async function POST(req: NextRequest) {
         getUserPlan(userId),
         getTotalLogCount(userId),
       ]);
-      if (totalLogs >= 1000 && plan === "free") {
+      if (totalLogs >= 5000 && plan === "free") {
         return NextResponse.json(
           { error: "Monthly log limit reached" },
           { status: 429, headers: getCorsHeaders() }

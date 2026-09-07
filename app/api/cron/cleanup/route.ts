@@ -17,7 +17,7 @@ export async function GET(req: NextRequest) {
 
     // Thresholds
     const freeCutoff = new Date(now);
-    freeCutoff.setUTCDate(freeCutoff.getUTCDate() - 3);
+    freeCutoff.setUTCDate(freeCutoff.getUTCDate() - 7);
 
     const proCutoff = new Date(now);
     proCutoff.setUTCDate(proCutoff.getUTCDate() - 30);
@@ -48,7 +48,7 @@ export async function GET(req: NextRequest) {
     let totalDeleted = 0;
     const errors: string[] = [];
 
-    // 3. Delete usage_logs older than 3 days for free-tier orgs
+    // 3. Delete usage_logs older than 7 days for free-tier orgs
     if (freeOrgIds.length > 0) {
       const { count, error: freeError } = await supabaseAdmin
         .from("usage_logs")

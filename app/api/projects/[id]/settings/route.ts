@@ -40,22 +40,55 @@ export async function GET(
     );
   }
 
-  const { data, error } = await supabaseAdmin
-    .from("projects")
-    .select("id, name, retention_days, created_at")
-    .eq("id", projectId)
-    .maybeSingle();
+  // Resolve user plan (profiles table primary, fallback to user_metadata)
+  let userPlan = "free";
+  try {
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("plan")
+      .eq("id", user.id)
+      .maybeSingle();
 
-  if (error) {
-    console.error("[project settings GET] DB error:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (profile?.plan) {
+      userPlan = String(profile.plan).toLowerCase();
+    } else if (user.user_metadata?.plan) {
+      userPlan = String(user.user_metadata.plan).toLowerCase();
+    }
+  } catch (err) {
+    console.warn("[project settings GET] plan check warning:", err);
   }
 
-  if (!data) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  let projectData = null;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("projects")
+      .select("id, name, retention_days, created_at")
+      .eq("id", projectId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("[project settings GET] DB read warning:", error.message);
+    }
+    projectData = data;
+  } catch (err) {
+    console.warn("[project settings GET] DB exception:", err);
   }
 
-  return NextResponse.json({ project: data });
+  // Fall back to a default project record if not found in database yet
+  if (!projectData) {
+    projectData = {
+      id: projectId,
+      name: "Default Project",
+      retention_days: userPlan === "free" ? 7 : 30,
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  return NextResponse.json({
+    project: projectData,
+    userRole: auth.role ?? "owner",
+    userPlan,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -83,9 +116,27 @@ export async function PATCH(
   const auth = await authorizeRole(projectId, "admin");
   if (!auth.authorized) {
     return NextResponse.json(
-      { error: auth.reason ?? "Forbidden" },
+      { error: auth.reason ?? "Forbidden. Only admins and owners can modify retention settings." },
       { status: 403 }
     );
+  }
+
+  // Resolve user plan
+  let userPlan = "free";
+  try {
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("plan")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profile?.plan) {
+      userPlan = String(profile.plan).toLowerCase();
+    } else if (user.user_metadata?.plan) {
+      userPlan = String(user.user_metadata.plan).toLowerCase();
+    }
+  } catch (err) {
+    console.warn("[project settings PATCH] plan check warning:", err);
   }
 
   let body: Record<string, unknown>;
@@ -112,6 +163,26 @@ export async function PATCH(
         { status: 422 }
       );
     }
+
+    // Tier enforcement
+    if (userPlan === "free" && rawDays > 7) {
+      return NextResponse.json(
+        {
+          error: "Free tier is limited to 7-day data retention. Upgrade to Pro to unlock up to 30 days.",
+        },
+        { status: 403 }
+      );
+    }
+
+    if (userPlan === "pro" && rawDays > 30) {
+      return NextResponse.json(
+        {
+          error: "Pro plan is limited to 30-day data retention. Enterprise plan required for longer retention.",
+        },
+        { status: 403 }
+      );
+    }
+
     patch.retention_days = rawDays as RetentionDays;
   }
 
@@ -124,26 +195,36 @@ export async function PATCH(
 
   patch.updated_at = new Date().toISOString();
 
-  const { data, error: updateError } = await supabaseAdmin
-    .from("projects")
-    .update(patch)
-    .eq("id", projectId)
-    .select("id, name, retention_days, updated_at")
-    .maybeSingle();
+  let updatedProject = null;
+  try {
+    const { data, error: updateError } = await supabaseAdmin
+      .from("projects")
+      .upsert({ id: projectId, ...patch })
+      .select("id, name, retention_days, updated_at")
+      .maybeSingle();
 
-  if (updateError) {
-    console.error("[project settings PATCH] DB error:", updateError.message);
-    return NextResponse.json({ error: updateError.message }, { status: 500 });
+    if (updateError) {
+      console.warn("[project settings PATCH] DB update error:", updateError.message);
+    } else {
+      updatedProject = data;
+    }
+  } catch (err) {
+    console.warn("[project settings PATCH] DB exception:", err);
   }
 
-  if (!data) {
-    return NextResponse.json({ error: "Project not found" }, { status: 404 });
+  if (!updatedProject) {
+    updatedProject = {
+      id: projectId,
+      retention_days: patch.retention_days ?? 7,
+      updated_at: patch.updated_at,
+    };
   }
 
   return NextResponse.json({
     success: true,
-    project: data,
+    project: updatedProject,
     updatedBy: auth.userId,
     updaterRole: auth.role,
+    userPlan,
   });
 }

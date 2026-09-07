@@ -7,7 +7,7 @@ export const revalidate = 0;
 export const fetchCache = "force-no-store";
 
 const TIER_LIMITS: Record<string, { name: string; limit: number; label: string }> = {
-  free: { name: "Free Sandbox", limit: 1000, label: "1,000 logs/mo" },
+  free: { name: "Free Sandbox", limit: 5000, label: "5,000 logs/mo" },
   pro: { name: "Pro Tier", limit: 500000, label: "500,000 logs/mo" },
 };
 
