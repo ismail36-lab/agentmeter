@@ -10,6 +10,7 @@ export interface AuthenticatedApiKey {
   budget_cap_usd?: number | null;
   current_period_spend_usd?: number | null;
   budget_action?: string | null;
+  [key: string]: any;
 }
 
 export interface VerifyApiKeyResult {
@@ -21,18 +22,18 @@ export interface VerifyApiKeyResult {
 
 /**
  * Validates an incoming raw API key against Supabase api_keys table.
- * Computes SHA-256 hash of raw key and queries api_keys where key_hash = computed_hash and is_active = true.
+ * Computes SHA-256 hash of raw key and queries api_keys where key_hash = computedHash AND is_active = true using service-role client.
  */
 export async function verifyApiKey(rawKey: string): Promise<VerifyApiKeyResult> {
   const cleanKey = (rawKey || "").replace(/^["']|["']$/g, "").trim();
 
   if (!cleanKey) {
-    console.log("[telemetry-auth] Verification failed: Missing API Key");
+    console.log("[telemetry-auth] Verification failed: Missing API Key in request headers");
     return { success: false, error: "Unauthorized: Missing API Key" };
   }
 
   if (cleanKey.includes("...")) {
-    console.log("[telemetry-auth] Verification failed: Truncated masked placeholder received");
+    console.log("[telemetry-auth] Verification failed: Truncated masked placeholder received:", cleanKey);
     return {
       success: false,
       error: "Unauthorized: Invalid API Key — received a masked placeholder instead of the full secret key.",
@@ -43,14 +44,14 @@ export async function verifyApiKey(rawKey: string): Promise<VerifyApiKeyResult> 
   const computedHash = crypto.createHash("sha256").update(cleanKey).digest("hex");
   const prefix = cleanKey.slice(0, 12);
 
-  // Debug log statements as requested
+  // Debug log statements for local debugging
   console.log(`[telemetry-auth] Incoming raw key prefix: ${prefix}...`);
   console.log(`[telemetry-auth] Calculated SHA-256 hash: ${computedHash}`);
 
   // Database lookup: SELECT * FROM api_keys WHERE key_hash = <computed_hash> AND is_active = true
   const { data, error } = await supabaseAdmin
     .from("api_keys")
-    .select("id, name, user_id, is_active, status, budget_cap_usd, current_period_spend_usd, budget_action")
+    .select("*")
     .eq("key_hash", computedHash)
     .eq("is_active", true)
     .maybeSingle();
@@ -69,7 +70,8 @@ export async function verifyApiKey(rawKey: string): Promise<VerifyApiKeyResult> 
 
   return {
     success: true,
-    apiKeyRecord: data,
+    apiKeyRecord: data as AuthenticatedApiKey,
     userId: data.user_id ?? null,
   };
 }
+

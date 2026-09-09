@@ -482,10 +482,12 @@ export default function Dashboard() {
 
       if (data.key) {
         // data.key.fullKey is the real secret — only available immediately after creation.
-        // data.key.key is the masked display string stored in the DB; never use it as the auth token.
         const realKey = data.key.fullKey || data.key.key;
         setNewlyCreatedKey(realKey);
-        setTestApiKey(realKey); // Auto-select new key in tester using the real secret
+        if (realKey && !realKey.includes("...")) {
+          setInMemorySecrets((prev) => ({ ...prev, [data.key.id]: realKey }));
+        }
+        setTestApiKey(data.key.id); // Auto-select new key in tester using key ID
         setNewKeyName("");
         await fetchApiKeys();
       }
@@ -548,7 +550,7 @@ export default function Dashboard() {
     // Look up selected key and its in-memory raw secret key
     const selectedKeyObj = apiKeys.find((k) => k.id === testApiKey || k.key === testApiKey);
     const keyId = selectedKeyObj?.id || testApiKey;
-    const rawSecret = inMemorySecrets[keyId] || selectedKeyObj?.fullKey;
+    const rawSecret = inMemorySecrets[keyId] || selectedKeyObj?.fullKey || (!testApiKey.includes("...") && testApiKey.startsWith("mx_") ? testApiKey : undefined);
 
     if (!rawSecret || rawSecret.includes("...")) {
       setTestResult({
@@ -1098,8 +1100,9 @@ export default function Dashboard() {
           onRefresh={fetchApiKeys}
           onKeyCreated={(newKey) => {
             setApiKeys((prev) => [newKey, ...prev]);
-            if (newKey.fullKey) {
-              setInMemorySecrets((prev) => ({ ...prev, [newKey.id]: newKey.fullKey! }));
+            const rawSecretKey = newKey.fullKey || newKey.key;
+            if (rawSecretKey && !rawSecretKey.includes("...")) {
+              setInMemorySecrets((prev) => ({ ...prev, [newKey.id]: rawSecretKey }));
             }
             setTestApiKey(newKey.id);
           }}
