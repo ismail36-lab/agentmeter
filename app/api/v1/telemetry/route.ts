@@ -388,6 +388,9 @@ export async function POST(req: NextRequest) {
       input_tokens: Number(body.prompt_tokens || body.input_tokens || 0),
       output_tokens: Number(body.completion_tokens || body.output_tokens || 0),
       total_cost_usd: calculatedCost,
+      latency_ms: Number(body.latency_ms || 0),
+      status_code: Number(body.status_code || 200),
+      is_estimated: Boolean(body.is_estimated ?? false),
     };
 
     const { data: logData, error: logError } = await supabaseAdmin
