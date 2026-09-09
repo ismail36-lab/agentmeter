@@ -602,6 +602,13 @@ export default function Dashboard() {
     });
   }, [logs, selectedFilterModel, selectedFilterEnv]);
 
+  // Dynamic unique model list derived from fetched logs — sorted alphabetically
+  const uniqueModels = useMemo(() => {
+    const seen = new Set<string>();
+    logs.forEach((log) => { if (log.model) seen.add(log.model); });
+    return Array.from(seen).sort((a, b) => a.localeCompare(b));
+  }, [logs]);
+
   // Handle Ingestion API Test Payload Submission
   const handleSendTestTelemetry = async () => {
     // Priority 1: Value typed in "Secret Key Input" field
@@ -1404,11 +1411,9 @@ export default function Dashboard() {
                   className="bg-zinc-950 border border-zinc-800 text-xs rounded-lg px-2.5 py-1.5 text-zinc-300 focus:outline-none focus:border-indigo-500/60 font-mono transition-colors"
                 >
                   <option value="all">All Models</option>
-                  <option value="gpt-4o">gpt-4o</option>
-                  <option value="gpt-4o-mini">gpt-4o-mini</option>
-                  <option value="claude-3-5-sonnet">claude-3-5-sonnet</option>
-                  <option value="gemini-1.5-pro">gemini-1.5-pro</option>
-                  <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                  {uniqueModels.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
                 </select>
               </div>
             </div>
