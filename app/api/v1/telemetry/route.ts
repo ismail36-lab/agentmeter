@@ -377,36 +377,25 @@ export async function POST(req: NextRequest) {
 
     const nowIso = new Date().toISOString();
 
-    // 5. Construct sanitized log payload matching strict columns in usage_logs schema
+    // 5. Safe Insert Schema: Only pass base table columns (user_id, model, prompt_tokens, completion_tokens, total_tokens, cost_usd)
+    // Strip all dynamic fields (cache_creation_tokens, cache_read_tokens, raw_payload, etc.) before executing database write
     const effectiveUserId = userId || apiKeyRecord?.user_id || null;
 
-    const sanitizedPayload: Record<string, any> = {
+    const safePayload: Record<string, any> = {
       user_id: effectiveUserId,
       model: modelKey,
       prompt_tokens: pTokens,
       completion_tokens: cTokens,
       total_tokens: totalTokens,
       cost_usd: roundedCost,
-      raw_payload: {
-        provider,
-        environment: envTag,
-        agent_name: agentTag || "default-agent",
-        end_user_id: endUserTag,
-        ...(sessionIdTag && { session_id: sessionIdTag }),
-        cached_tokens: cachedTokens,
-        cache_creation_tokens: cacheCreationTokens,
-        is_estimated: isEstimated,
-        latency_ms: Number(body.latency_ms || body.latency) || 100,
-        metadata: metadata || {},
-      },
     };
 
-    console.log("[telemetry-ingest] Inserting sanitized log payload:", JSON.stringify(sanitizedPayload));
+    console.log("[telemetry-ingest] Inserting safe payload into usage_logs:", JSON.stringify(safePayload));
 
-    // Primary insert attempt with sanitized schema columns
+    // Execute primary database write using safe payload schema
     let { data: logData, error: logError } = await supabaseAdmin
       .from("usage_logs")
-      .insert([sanitizedPayload])
+      .insert([safePayload])
       .select()
       .single();
 
@@ -422,28 +411,21 @@ export async function POST(req: NextRequest) {
         logError.code
       );
 
-      // Fallback attempt with total_cost_usd and input_tokens / output_tokens columns if column schema varies
-      if (logError.code === "PGRST204" || logError.message?.toLowerCase().includes("column")) {
-        const fallbackPayload: Record<string, any> = {
-          user_id: effectiveUserId,
-          model: modelKey,
-          prompt_tokens: pTokens,
-          completion_tokens: cTokens,
-          total_tokens: totalTokens,
-          cost_usd: roundedCost,
-          total_cost_usd: roundedCost,
-          cost: roundedCost,
-          input_tokens: pTokens,
-          output_tokens: cTokens,
-          provider,
-          environment: envTag,
-          agent_name: agentTag || "default-agent",
-        };
-
-        console.log("[telemetry-ingest] Retrying insert with fallback payload columns...");
+      // Fallback: If cost_usd column doesn't exist in Supabase schema (PGRST204), try total_cost_usd / cost
+      if (logError.code === "PGRST204" || logError.message?.toLowerCase().includes("cost")) {
+        console.log("[telemetry-ingest] Retrying with total_cost_usd column fallback...");
         const fallbackRes = await supabaseAdmin
           .from("usage_logs")
-          .insert([fallbackPayload])
+          .insert([
+            {
+              user_id: effectiveUserId,
+              model: modelKey,
+              prompt_tokens: pTokens,
+              completion_tokens: cTokens,
+              total_tokens: totalTokens,
+              total_cost_usd: roundedCost,
+            },
+          ])
           .select()
           .single();
 
@@ -451,16 +433,35 @@ export async function POST(req: NextRequest) {
           logData = fallbackRes.data;
           logError = null;
         } else {
-          console.error(
-            "[telemetry-ingest] Fallback insert error:",
-            fallbackRes.error.message,
-            "| Details:",
-            fallbackRes.error.details,
-            "| Hint:",
-            fallbackRes.error.hint,
-            "| Code:",
-            fallbackRes.error.code
-          );
+          console.log("[telemetry-ingest] Retrying with cost column fallback...");
+          const costRes = await supabaseAdmin
+            .from("usage_logs")
+            .insert([
+              {
+                user_id: effectiveUserId,
+                model: modelKey,
+                prompt_tokens: pTokens,
+                completion_tokens: cTokens,
+                total_tokens: totalTokens,
+                cost: roundedCost,
+              },
+            ])
+            .select()
+            .single();
+
+          if (!costRes.error) {
+            logData = costRes.data;
+            logError = null;
+          } else {
+            console.error(
+              "[telemetry-ingest] Fallback insert error:",
+              costRes.error.message,
+              "| Details:",
+              costRes.error.details,
+              "| Code:",
+              costRes.error.code
+            );
+          }
         }
       }
     }
