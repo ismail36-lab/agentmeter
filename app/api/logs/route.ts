@@ -27,7 +27,9 @@ export async function GET(req: NextRequest) {
   const { data: { user }, error: authError } = await supabase.auth.getUser();
 
   const NO_CACHE_HEADERS = {
-    "Cache-Control": "no-store, max-age=0",
+    "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0",
+    "Pragma": "no-cache",
+    "Expires": "0",
     "CDN-Cache-Control": "no-store",
     "Vercel-CDN-Cache-Control": "no-store",
   };
@@ -40,29 +42,29 @@ export async function GET(req: NextRequest) {
     let logs: any[] = [];
     let queryError: any = null;
 
-    // 1. Try querying telemetry_logs table
-    const { data: tLogs, error: tErr } = await supabaseAdmin
-      .from("telemetry_logs")
+    // 1. Primary lookup: usage_logs table ordered by created_at DESC
+    const { data: uLogs, error: uErr } = await supabaseAdmin
+      .from("usage_logs")
       .select("*")
       .or(`user_id.eq.${user.id},user_id.is.null`)
       .order("created_at", { ascending: false })
       .limit(100);
 
-    if (!tErr && tLogs && tLogs.length > 0) {
-      logs = tLogs;
+    if (!uErr && uLogs && uLogs.length > 0) {
+      logs = uLogs;
     } else {
-      // 2. Fallback to usage_logs table
-      const { data: uLogs, error: uErr } = await supabaseAdmin
-        .from("usage_logs")
+      if (uErr) queryError = uErr;
+      // 2. Secondary fallback: telemetry_logs table
+      const { data: tLogs, error: tErr } = await supabaseAdmin
+        .from("telemetry_logs")
         .select("*")
         .or(`user_id.eq.${user.id},user_id.is.null`)
         .order("created_at", { ascending: false })
         .limit(100);
 
-      if (uErr) {
-        queryError = uErr;
-      } else {
-        logs = uLogs || [];
+      if (tLogs && tLogs.length > 0) {
+        logs = tLogs;
+        queryError = null;
       }
     }
 
@@ -90,8 +92,11 @@ export async function GET(req: NextRequest) {
         completion_tokens: cTokens,
         total_tokens: tTokens,
         cost: costVal,
+        total_cost_usd: costVal,
         is_estimated: isEstimated,
         user_id: log.user_id,
+        environment: log.environment || log.metadata?.environment || "production",
+        agent_name: log.agent_name || log.metadata?.agent_name || "default-agent",
       };
     });
 
@@ -101,3 +106,4 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
   }
 }
+

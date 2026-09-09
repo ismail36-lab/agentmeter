@@ -368,7 +368,7 @@ export default function Dashboard() {
       const headers: Record<string, string> = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const res = await fetch("/api/metrics", { headers, cache: "no-store" });
+      const res = await fetch(`/api/metrics?t=${Date.now()}`, { headers, cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         if (data.metrics) setMetrics(data.metrics);
@@ -397,7 +397,7 @@ export default function Dashboard() {
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       // 1. Fetch via /api/logs API route with cache bypass
-      const res = await fetch("/api/logs", { headers, cache: "no-store" });
+      const res = await fetch(`/api/logs?t=${Date.now()}`, { headers, cache: "no-store" });
       if (res.ok) {
         const data = await res.json();
         if (data.logs) {
@@ -407,22 +407,22 @@ export default function Dashboard() {
         }
       }
 
-      // 2. Direct Supabase client query fallback for telemetry_logs
+      // 2. Direct Supabase client query fallback for usage_logs ordered by created_at DESC
       const activeUid = uid ?? userId;
       let { data, error } = await supabase
-        .from("telemetry_logs")
+        .from("usage_logs")
         .select("*")
         .order("created_at", { ascending: false })
         .limit(100);
 
       if (error || !data || data.length === 0) {
-        const uRes = await supabase
-          .from("usage_logs")
+        const tRes = await supabase
+          .from("telemetry_logs")
           .select("*")
           .order("created_at", { ascending: false })
           .limit(100);
-        if (!uRes.error && uRes.data) {
-          data = uRes.data;
+        if (!tRes.error && tRes.data) {
+          data = tRes.data;
           error = null;
         }
       }
@@ -590,9 +590,12 @@ export default function Dashboard() {
       setTestResult(data);
 
       if (res.ok && data.success) {
-        // Refetch logs and metrics so charts update live
-        await fetchMetrics();
-        await fetchLogs(userId);
+        // Refetch logs, metrics, and plan details concurrently so charts, tables, and subscription quotas update live instantly
+        await Promise.all([
+          fetchMetrics(),
+          fetchLogs(userId),
+          fetchPlanDetails(),
+        ]);
       }
     } catch (err: any) {
       console.error("[tester-ui] Test telemetry request failed:", err);
