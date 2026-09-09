@@ -384,10 +384,10 @@ export async function POST(req: NextRequest) {
     const safeInsertPayload = {
       user_id: keyData.user_id,
       model: body.model,
-      prompt_tokens: Number(body.prompt_tokens || 0),
-      completion_tokens: Number(body.completion_tokens || 0),
-      total_tokens: Number(body.prompt_tokens || 0) + Number(body.completion_tokens || 0),
-      cost_usd: calculatedCost,
+      provider: body.provider || 'openai',
+      input_tokens: Number(body.prompt_tokens || body.input_tokens || 0),
+      output_tokens: Number(body.completion_tokens || body.output_tokens || 0),
+      total_cost_usd: calculatedCost,
     };
 
     const { data: logData, error: logError } = await supabaseAdmin
