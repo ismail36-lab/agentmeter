@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { dispatchWebhookAlert } from "@/lib/webhooks";
 import { verifyApiKey } from "@/lib/auth/meterix";
+import { createClient } from "@/utils/supabase/server";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ function getCorsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key, x-internal-test, x-key-id",
   };
 }
 
@@ -29,7 +30,7 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Extract API Key from headers (prefer x-api-key, fallback to Authorization: Bearer)
+    // 1. Extract API Key and headers
     const authHeader = req.headers.get("authorization");
     const xApiKey = req.headers.get("x-api-key");
 
@@ -45,25 +46,94 @@ export async function POST(req: NextRequest) {
     // Strip any accidental wrapping quotes
     apiKey = apiKey.replace(/^["']|["']$/g, "").trim();
 
-    if (!apiKey) {
-      console.log("[telemetry-auth] Authentication FAILED: Missing API Key in request headers");
+    // 2. Parse JSON Body early
+    const body = await req.json().catch(() => ({}));
+    const requestedKeyId = body.key_id || body.keyId || req.headers.get("x-key-id");
+
+    let userId: string | null = null;
+    let apiKeyRecord: any = null;
+
+    // 3a. Primary Auth Path: Attempt API Key verification if key is provided
+    if (apiKey) {
+      const authResult = await verifyApiKey(apiKey);
+      if (authResult.success && authResult.apiKeyRecord) {
+        apiKeyRecord = authResult.apiKeyRecord;
+        userId = authResult.userId ?? null;
+      }
+    }
+
+    // 3b. Fallback Auth Path: Active dashboard session / cookies or JWT token
+    if (!apiKeyRecord) {
+      // Try resolving active user session via cookies
+      try {
+        const supabase = createClient();
+        const { data: { user: sessionUser } } = await supabase.auth.getUser();
+        if (sessionUser) {
+          userId = sessionUser.id;
+        }
+      } catch (err) {
+        console.warn("[telemetry-auth] Notice reading session cookies:", err);
+      }
+
+      // Try resolving Bearer token as a Supabase JWT if cookie didn't yield a user
+      if (!userId && authHeader && authHeader.startsWith("Bearer ")) {
+        const token = authHeader.substring(7).trim();
+        if (token && !token.startsWith("mx_")) {
+          const { data: { user: jwtUser } } = await supabaseAdmin.auth.getUser(token);
+          if (jwtUser) {
+            userId = jwtUser.id;
+          }
+        }
+      }
+
+      // If user session authenticated successfully:
+      if (userId) {
+        // Look up specified key_id in api_keys DB
+        if (requestedKeyId) {
+          const { data: foundKey } = await supabaseAdmin
+            .from("api_keys")
+            .select("*")
+            .eq("id", requestedKeyId)
+            .eq("user_id", userId)
+            .maybeSingle();
+          if (foundKey) {
+            apiKeyRecord = foundKey;
+          }
+        }
+
+        // If not found by key_id, look up primary active key for user
+        if (!apiKeyRecord) {
+          const { data: primaryKey } = await supabaseAdmin
+            .from("api_keys")
+            .select("*")
+            .eq("user_id", userId)
+            .eq("is_active", true)
+            .order("created_at", { ascending: true })
+            .limit(1)
+            .maybeSingle();
+
+          if (primaryKey) {
+            apiKeyRecord = primaryKey;
+          } else {
+            // Fallback synthetic key if user has no keys in DB yet
+            apiKeyRecord = {
+              id: requestedKeyId || "internal-tester",
+              user_id: userId,
+              name: "Dashboard Tester",
+              is_active: true,
+            };
+          }
+        }
+      }
+    }
+
+    if (!apiKeyRecord || !userId) {
+      console.log("[telemetry-auth] Authentication FAILED: Invalid API Key and no active user session found");
       return NextResponse.json(
-        { error: "Unauthorized: Missing API Key in x-api-key header or Authorization header" },
+        { error: "Secret key missing or invalid, and no active user session found" },
         { status: 401, headers: getCorsHeaders() }
       );
     }
-
-    // 2. Validate incoming API key using verifyApiKey (SHA-256 hash matching against api_keys DB)
-    const authResult = await verifyApiKey(apiKey);
-    if (!authResult.success || !authResult.apiKeyRecord) {
-      return NextResponse.json(
-        { error: authResult.error || "Unauthorized: Invalid API Key" },
-        { status: 401, headers: getCorsHeaders() }
-      );
-    }
-
-    const apiKeyRecord = authResult.apiKeyRecord;
-    const userId = authResult.userId ?? null;
 
     // 2b. Quota Limit Enforcement: Check public.profiles first (Stripe-driven plan),
     //     then fall back to user_metadata plan, then default to 'free'.
@@ -116,8 +186,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Parse JSON Body
-    const body = await req.json();
+    // 3. Extract JSON Body fields (parsed at top of handler)
     const { model, prompt_tokens, completion_tokens, input_tokens, output_tokens, metadata } = body;
 
     const pTokens = Number(prompt_tokens ?? input_tokens ?? 0);

@@ -27,8 +27,6 @@ import {
   Loader2,
   AlertCircle,
   AlertTriangle,
-  Eye,
-  EyeOff,
   TrendingUp,
   BookOpen,
   CreditCard,
@@ -294,8 +292,6 @@ export default function Dashboard() {
   const [testPromptTokens, setTestPromptTokens] = useState<number>(1500);
   const [testCompletionTokens, setTestCompletionTokens] = useState<number>(450);
   const [testApiKey, setTestApiKey] = useState<string>("");
-  const [testSecretKeyInput, setTestSecretKeyInput] = useState<string>("");
-  const [showTestSecretInput, setShowTestSecretInput] = useState<boolean>(false);
   const [inMemorySecrets, setInMemorySecrets] = useState<Record<string, string>>({});
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
@@ -346,11 +342,7 @@ export default function Dashboard() {
 
         // Auto-select first key ID for playground if testApiKey is empty.
         if (activeKeys.length > 0 && !testApiKey) {
-          const firstId = activeKeys[0].id;
-          setTestApiKey(firstId);
-          if (inMemorySecrets[firstId]) {
-            setTestSecretKeyInput(inMemorySecrets[firstId]);
-          }
+          setTestApiKey(activeKeys[0].id);
         }
       }
     } catch (err) {
@@ -548,7 +540,6 @@ export default function Dashboard() {
         setNewlyCreatedKey(realKey);
         if (realKey && !realKey.includes("...")) {
           setInMemorySecrets((prev) => ({ ...prev, [data.key.id]: realKey }));
-          setTestSecretKeyInput(realKey); // Auto-fill Secret Key Input field
         }
         setTestApiKey(data.key.id); // Auto-select new key in tester using key ID
         setNewKeyName("");
@@ -612,16 +603,13 @@ export default function Dashboard() {
 
   // Build a ready-to-run cURL command from the current tester form state.
   // The raw secret is resolved at call-time and written directly to the clipboard
-  // — it is never rendered into the DOM in plain text.
+  // Build a ready-to-run cURL command from the current tester form state.
+  // The raw secret is resolved from memory if available, otherwise shown as placeholder.
   const buildCurlCommand = () => {
-    const typedSecret = testSecretKeyInput.trim();
     const selectedKeyObj = apiKeys.find((k) => k.id === testApiKey || k.key === testApiKey);
     const keyId = selectedKeyObj?.id || testApiKey;
     const memSecret = inMemorySecrets[keyId] || selectedKeyObj?.fullKey;
-    const secret =
-      typedSecret && !typedSecret.includes("...")
-        ? typedSecret
-        : memSecret || "<YOUR_SECRET_KEY>";
+    const secret = memSecret || "<YOUR_SECRET_KEY>";
     const origin =
       typeof window !== "undefined" ? window.location.origin : "https://your-domain.com";
     const bodyObj = {
@@ -647,35 +635,40 @@ export default function Dashboard() {
 
   // Handle Ingestion API Test Payload Submission
   const handleSendTestTelemetry = async () => {
-    // Priority 1: Value typed in "Secret Key Input" field
-    const typedSecret = testSecretKeyInput.trim();
-
-    // Priority 2: Fall back to memory state if available
     const selectedKeyObj = apiKeys.find((k) => k.id === testApiKey || k.key === testApiKey);
     const keyId = selectedKeyObj?.id || testApiKey;
-    const memorySecret = inMemorySecrets[keyId] || selectedKeyObj?.fullKey || (!testApiKey.includes("...") && testApiKey.startsWith("mx_") ? testApiKey : undefined);
-
-    const rawSecret = (typedSecret && !typedSecret.includes("...")) ? typedSecret : memorySecret;
-
-    if (!rawSecret || rawSecret.includes("...")) {
-      setTestResult({
-        error: "Secret key missing or not in memory. Please paste your raw secret key (mx_live_...) into the Secret Key Input field below.",
-      });
-      return;
-    }
+    const memorySecret =
+      inMemorySecrets[keyId] ||
+      selectedKeyObj?.fullKey ||
+      (!testApiKey.includes("...") && testApiKey.startsWith("mx_") ? testApiKey : undefined);
 
     setIsSendingTest(true);
     setTestResult(null);
     try {
-      console.log(`[tester-ui] Sending test telemetry request using in-memory secret key for ID ${keyId}...`);
+      console.log(`[tester-ui] Sending test telemetry request for key ID ${keyId}...`);
+
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-internal-test": "true",
+      };
+
+      if (memorySecret && !memorySecret.includes("...")) {
+        headers["x-api-key"] = memorySecret;
+        headers["Authorization"] = `Bearer ${memorySecret}`;
+      } else {
+        // Fall back to active user session Bearer token for internal tester requests
+        const sessionRes = await supabase.auth.getSession();
+        const token = sessionRes.data.session?.access_token;
+        if (token) {
+          headers["Authorization"] = `Bearer ${token}`;
+        }
+      }
+
       const res = await fetch("/api/v1/telemetry", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": rawSecret,
-          Authorization: `Bearer ${rawSecret}`,
-        },
+        headers,
         body: JSON.stringify({
+          key_id: keyId,
           model: testModel,
           prompt_tokens: testPromptTokens,
           completion_tokens: testCompletionTokens,
@@ -687,7 +680,7 @@ export default function Dashboard() {
       console.log("[tester-ui] Telemetry ingestion response:", data);
       setTestResult(data);
 
-      if (res.ok && data.success) {
+      if (res.ok && (data.success || data.log_id)) {
         // Optimistically prepend the payload + generated log_id directly to the active log table's local state so it appears instantly
         const optimisticLogItem: UsageLog = {
           id: data.log_id || "log_" + Date.now(),
@@ -1231,7 +1224,6 @@ export default function Dashboard() {
             const rawSecretKey = newKey.fullKey || newKey.key;
             if (rawSecretKey && !rawSecretKey.includes("...")) {
               setInMemorySecrets((prev) => ({ ...prev, [newKey.id]: rawSecretKey }));
-              setTestSecretKeyInput(rawSecretKey); // Auto-fill Secret Key Input field
             }
             setTestApiKey(newKey.id);
           }}
@@ -1290,13 +1282,7 @@ export default function Dashboard() {
                 <select
                   value={testApiKey}
                   onChange={(e) => {
-                    const newKeyId = e.target.value;
-                    setTestApiKey(newKeyId);
-                    if (inMemorySecrets[newKeyId]) {
-                      setTestSecretKeyInput(inMemorySecrets[newKeyId]);
-                    } else {
-                      setTestSecretKeyInput("");
-                    }
+                    setTestApiKey(e.target.value);
                   }}
                   className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 focus:outline-none focus:border-indigo-500/60 transition-colors text-xs font-mono"
                 >
@@ -1318,38 +1304,6 @@ export default function Dashboard() {
                 </select>
               </div>
 
-              <div>
-                <label className="block text-zinc-500 mb-1 font-sans flex items-center justify-between">
-                  <span>Secret Key Input</span>
-                  <span className="text-[10px] text-zinc-500 font-sans">Raw key used for x-api-key</span>
-                </label>
-                <div className="relative">
-                  <input
-                    type={showTestSecretInput ? "text" : "password"}
-                    placeholder="mx_live_..."
-                    value={testSecretKeyInput}
-                    onChange={(e) => setTestSecretKeyInput(e.target.value)}
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg pl-3 pr-9 py-2.5 text-zinc-200 focus:outline-none focus:border-indigo-500/60 transition-colors text-xs font-mono placeholder:text-zinc-600"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowTestSecretInput(!showTestSecretInput)}
-                    className="absolute right-2.5 top-2.5 text-zinc-500 hover:text-zinc-300 transition-colors"
-                    title={showTestSecretInput ? "Hide Secret Key" : "Show Secret Key"}
-                  >
-                    {showTestSecretInput ? (
-                      <EyeOff className="h-3.5 w-3.5" />
-                    ) : (
-                      <Eye className="h-3.5 w-3.5" />
-                    )}
-                  </button>
-                </div>
-                {!testSecretKeyInput && testApiKey && !inMemorySecrets[testApiKey] && (
-                  <p className="text-[11px] font-sans text-amber-400/80 mt-1.5 leading-relaxed">
-                    Note: Secret key not in memory. Paste your raw secret key (<code className="font-mono">mx_live_...</code>) above to send telemetry.
-                  </p>
-                )}
-              </div>
 
               <div>
                 <label className="block text-zinc-500 mb-1 flex items-center gap-1.5">
