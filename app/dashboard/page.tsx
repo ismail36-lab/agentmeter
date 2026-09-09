@@ -340,9 +340,10 @@ export default function Dashboard() {
         const activeKeys = (data.keys || []).filter((k: ApiKeyItem) => k.is_active);
         setApiKeys(activeKeys);
 
-        // Auto-select first key for playground if testApiKey is empty
+        // Auto-select first key for playground if testApiKey is empty.
+        // Prefer fullKey (real secret) over the masked display key.
         if (activeKeys.length > 0 && !testApiKey) {
-          setTestApiKey(activeKeys[0].key);
+          setTestApiKey(activeKeys[0].fullKey || activeKeys[0].key);
         }
       }
     } catch (err) {
@@ -480,8 +481,11 @@ export default function Dashboard() {
       }
 
       if (data.key) {
-        setNewlyCreatedKey(data.key.key);
-        setTestApiKey(data.key.key); // Auto select new key in tester
+        // data.key.fullKey is the real secret — only available immediately after creation.
+        // data.key.key is the masked display string stored in the DB; never use it as the auth token.
+        const realKey = data.key.fullKey || data.key.key;
+        setNewlyCreatedKey(realKey);
+        setTestApiKey(realKey); // Auto-select new key in tester using the real secret
         setNewKeyName("");
         await fetchApiKeys();
       }
@@ -1078,7 +1082,8 @@ export default function Dashboard() {
           onRefresh={fetchApiKeys}
           onKeyCreated={(newKey) => {
             setApiKeys((prev) => [newKey, ...prev]);
-            setTestApiKey(newKey.key);
+            // Use the real secret (fullKey) so the SHA-256 hash matches what's stored in api_keys.key_hash
+            setTestApiKey(newKey.fullKey || newKey.key);
           }}
           onKeyRevoked={(keyId) => {
             setApiKeys((prev) => prev.filter((k) => k.id !== keyId));
@@ -1120,7 +1125,10 @@ export default function Dashboard() {
                     <option value="">No keys available — Generate key above</option>
                   ) : (
                     apiKeys.map((k) => (
-                      <option key={k.id} value={k.key}>
+                      // Use fullKey (real secret) as the option value so the tester sends the
+                      // correct raw token — its SHA-256 hash matches api_keys.key_hash in Supabase.
+                      // Fall back to k.key only for legacy keys that were never hashed.
+                      <option key={k.id} value={k.fullKey || k.key}>
                         {k.name} ({k.key.startsWith("mx_") ? k.key.slice(0, 16) : k.key.slice(0, 12)}…)
                       </option>
                     ))

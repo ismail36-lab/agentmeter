@@ -47,6 +47,19 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Hash the raw token with SHA-256 and validate against `api_keys.key_hash` (with fallback for legacy keys)
+    // Guard: if the key looks like a masked display string (e.g. "mx_live_XXXX...XXXX"), the hash will
+    // never match. The Dashboard Tester should always send the full raw secret returned at key creation.
+    if (apiKey.includes("...")) {
+      console.warn(
+        "[telemetry] Received a masked/truncated API key (contains '...'). " +
+        "The Tester UI must send the full raw secret, not the display placeholder. " +
+        "Key prefix received: " + apiKey.slice(0, 20)
+      );
+      return NextResponse.json(
+        { error: "Unauthorized: Invalid API Key — received a masked placeholder instead of the full secret. Copy the full key shown at generation time." },
+        { status: 401, headers: getCorsHeaders() }
+      );
+    }
     const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
 
     let apiKeyRecord: {
