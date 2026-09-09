@@ -299,6 +299,7 @@ export default function Dashboard() {
   const [inMemorySecrets, setInMemorySecrets] = useState<Record<string, string>>({});
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
+  const [copiedCurl, setCopiedCurl] = useState(false);
 
   // Dynamic model pricing list (fetched from model_pricing table)
   const [pricingModels, setPricingModels] = useState<ModelPricingItem[]>([]);
@@ -608,6 +609,41 @@ export default function Dashboard() {
     logs.forEach((log) => { if (log.model) seen.add(log.model); });
     return Array.from(seen).sort((a, b) => a.localeCompare(b));
   }, [logs]);
+
+  // Build a ready-to-run cURL command from the current tester form state.
+  // The raw secret is resolved at call-time and written directly to the clipboard
+  // — it is never rendered into the DOM in plain text.
+  const buildCurlCommand = () => {
+    const typedSecret = testSecretKeyInput.trim();
+    const selectedKeyObj = apiKeys.find((k) => k.id === testApiKey || k.key === testApiKey);
+    const keyId = selectedKeyObj?.id || testApiKey;
+    const memSecret = inMemorySecrets[keyId] || selectedKeyObj?.fullKey;
+    const secret =
+      typedSecret && !typedSecret.includes("...")
+        ? typedSecret
+        : memSecret || "<YOUR_SECRET_KEY>";
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "https://your-domain.com";
+    const bodyObj = {
+      model: testModel,
+      prompt_tokens: testPromptTokens,
+      completion_tokens: testCompletionTokens,
+      metadata: { source: "Dashboard Playground", agent: "InteractiveTester" },
+    };
+    const bodyStr = JSON.stringify(bodyObj);
+    return (
+      "curl -X POST " + origin + "/api/v1/telemetry \\\n" +
+      "  -H \"Content-Type: application/json\" \\\n" +
+      "  -H \"x-api-key: " + secret + "\" \\\n" +
+      "  -d '" + bodyStr.replace(/'/g, "'\\''") + "'"
+    );
+  };
+
+  const handleCopyCurl = () => {
+    navigator.clipboard.writeText(buildCurlCommand());
+    setCopiedCurl(true);
+    setTimeout(() => setCopiedCurl(false), 2000);
+  };
 
   // Handle Ingestion API Test Payload Submission
   const handleSendTestTelemetry = async () => {
@@ -1213,14 +1249,35 @@ export default function Dashboard() {
 
           {/* API Tester */}
           <div className="bento-card p-6 space-y-4 sm:col-span-2 lg:col-span-1 w-full border border-zinc-800/80 bg-zinc-900/90">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2 font-sans tracking-tight">
                 <Terminal className="h-4 w-4 text-indigo-400" />
                 Ingestion API Tester
               </h3>
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-zinc-950 text-zinc-400 border border-zinc-800">
-                POST /api/v1/telemetry
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-zinc-950 text-zinc-400 border border-zinc-800">
+                  POST /api/v1/telemetry
+                </span>
+                <button
+                  id="copy-curl-btn"
+                  type="button"
+                  onClick={handleCopyCurl}
+                  title="Copy cURL command to clipboard"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-mono font-medium border transition-all duration-150 bg-zinc-900 border-zinc-700 text-zinc-400 hover:border-indigo-500/60 hover:text-indigo-300 hover:bg-indigo-950/40 active:scale-95"
+                >
+                  {copiedCurl ? (
+                    <>
+                      <CheckCircle2 className="h-3 w-3 text-indigo-400" />
+                      Copied!
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-3 w-3" />
+                      Copy cURL
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
 
             <p className="text-xs text-zinc-500">
@@ -1369,9 +1426,23 @@ export default function Dashboard() {
               <div className="p-3 rounded-lg bg-[#0c0d0e] border border-zinc-800 text-[11px] font-mono space-y-1 w-full">
                 <div className="flex items-center justify-between text-zinc-500">
                   <span>API Response:</span>
-                  <span className={testResult.success ? "text-indigo-400" : "text-rose-400"}>
-                    {testResult.success ? "200 OK" : "Error"}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className={testResult.success ? "text-indigo-400" : "text-rose-400"}>
+                      {testResult.success ? "200 OK" : "Error"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyCurl}
+                      title="Copy cURL command"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono border transition-all duration-150 bg-zinc-900 border-zinc-800 text-zinc-500 hover:border-indigo-500/50 hover:text-indigo-300 hover:bg-indigo-950/30 active:scale-95"
+                    >
+                      {copiedCurl ? (
+                        <><CheckCircle2 className="h-2.5 w-2.5 text-indigo-400" />Copied!</>
+                      ) : (
+                        <><Copy className="h-2.5 w-2.5" />cURL</>
+                      )}
+                    </button>
+                  </div>
                 </div>
                 <div className="w-full max-w-full overflow-x-auto">
                   <pre className="text-zinc-300 p-1 max-h-32">
