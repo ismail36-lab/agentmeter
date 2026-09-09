@@ -313,6 +313,7 @@ export default function Dashboard() {
       const data = await res.json();
       const models: ModelPricingItem[] = data.models ?? [];
       if (models.length > 0) {
+        models.sort((a, b) => a.model_name.localeCompare(b.model_name));
         setPricingModels(models);
         // Keep the selected model valid; fall back to first active model if current isn't listed
         const modelNames = models.map((m) => m.model_name);
@@ -594,12 +595,17 @@ export default function Dashboard() {
     });
   }, [logs, selectedFilterModel, selectedFilterEnv]);
 
-  // Dynamic unique model list derived from fetched logs — sorted alphabetically
+  // Dynamic unique model list derived from central pricing models UNION models present in usage_logs — sorted alphabetically
   const uniqueModels = useMemo(() => {
     const seen = new Set<string>();
-    logs.forEach((log) => { if (log.model) seen.add(log.model); });
+    pricingModels.forEach((m) => {
+      if (m.model_name) seen.add(m.model_name);
+    });
+    logs.forEach((log) => {
+      if (log.model) seen.add(log.model);
+    });
     return Array.from(seen).sort((a, b) => a.localeCompare(b));
-  }, [logs]);
+  }, [pricingModels, logs]);
 
   // Build a ready-to-run cURL command from the current tester form state.
   // The raw secret is resolved at call-time and written directly to the clipboard
