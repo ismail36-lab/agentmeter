@@ -377,104 +377,29 @@ export async function POST(req: NextRequest) {
 
     const nowIso = new Date().toISOString();
 
-    // 5. Safe Insert Schema: Only pass base table columns (user_id, model, prompt_tokens, completion_tokens, total_tokens, cost_usd)
-    // Strip all dynamic fields (cache_creation_tokens, cache_read_tokens, raw_payload, etc.) before executing database write
-    const effectiveUserId = userId || apiKeyRecord?.user_id || null;
+    // 5. Strictly sanitized minimal insert payload
+    const keyData = apiKeyRecord;
+    const calculatedCost = roundedCost;
 
-    const safePayload: Record<string, any> = {
-      user_id: effectiveUserId,
-      model: modelKey,
-      prompt_tokens: pTokens,
-      completion_tokens: cTokens,
-      total_tokens: totalTokens,
-      cost_usd: roundedCost,
+    const safeInsertPayload = {
+      user_id: keyData.user_id,
+      model: body.model,
+      prompt_tokens: Number(body.prompt_tokens || 0),
+      completion_tokens: Number(body.completion_tokens || 0),
+      total_tokens: Number(body.prompt_tokens || 0) + Number(body.completion_tokens || 0),
+      cost_usd: calculatedCost,
     };
 
-    console.log("[telemetry-ingest] Inserting safe payload into usage_logs:", JSON.stringify(safePayload));
-
-    // Execute primary database write using safe payload schema
-    let { data: logData, error: logError } = await supabaseAdmin
+    const { data: logData, error: logError } = await supabaseAdmin
       .from("usage_logs")
-      .insert([safePayload])
+      .insert(safeInsertPayload)
       .select()
       .single();
 
     if (logError) {
-      console.error(
-        "[telemetry-ingest] Primary insert error into usage_logs:",
-        logError.message,
-        "| Details:",
-        logError.details,
-        "| Hint:",
-        logError.hint,
-        "| Code:",
-        logError.code
-      );
-
-      // Fallback: If cost_usd column doesn't exist in Supabase schema (PGRST204), try total_cost_usd / cost
-      if (logError.code === "PGRST204" || logError.message?.toLowerCase().includes("cost")) {
-        console.log("[telemetry-ingest] Retrying with total_cost_usd column fallback...");
-        const fallbackRes = await supabaseAdmin
-          .from("usage_logs")
-          .insert([
-            {
-              user_id: effectiveUserId,
-              model: modelKey,
-              prompt_tokens: pTokens,
-              completion_tokens: cTokens,
-              total_tokens: totalTokens,
-              total_cost_usd: roundedCost,
-            },
-          ])
-          .select()
-          .single();
-
-        if (!fallbackRes.error) {
-          logData = fallbackRes.data;
-          logError = null;
-        } else {
-          console.log("[telemetry-ingest] Retrying with cost column fallback...");
-          const costRes = await supabaseAdmin
-            .from("usage_logs")
-            .insert([
-              {
-                user_id: effectiveUserId,
-                model: modelKey,
-                prompt_tokens: pTokens,
-                completion_tokens: cTokens,
-                total_tokens: totalTokens,
-                cost: roundedCost,
-              },
-            ])
-            .select()
-            .single();
-
-          if (!costRes.error) {
-            logData = costRes.data;
-            logError = null;
-          } else {
-            console.error(
-              "[telemetry-ingest] Fallback insert error:",
-              costRes.error.message,
-              "| Details:",
-              costRes.error.details,
-              "| Code:",
-              costRes.error.code
-            );
-          }
-        }
-      }
-    }
-
-    if (logError) {
-      const fullErrorMsg = logError.details ? `${logError.message} (${logError.details})` : logError.message;
+      console.error("[telemetry-ingest] Supabase insert error:", logError.message, logError.details);
       return NextResponse.json(
-        {
-          error: `Database write failed: ${fullErrorMsg}`,
-          details: logError.details || null,
-          hint: logError.hint || null,
-          code: logError.code || null,
-        },
+        { error: `Database write failed: ${logError.message}` },
         { status: 500, headers: getCorsHeaders() }
       );
     }
