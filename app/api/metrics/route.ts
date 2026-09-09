@@ -19,7 +19,7 @@ const MODEL_COLORS: Record<string, string> = {
 
 /** Helper to parse spend/cost from log row */
 function getLogCost(log: any): number {
-  const val = Number(log.total_cost_usd ?? log.cost ?? 0);
+  const val = Number(log.cost_usd ?? log.total_cost_usd ?? log.cost ?? 0);
   return isNaN(val) ? 0 : val;
 }
 

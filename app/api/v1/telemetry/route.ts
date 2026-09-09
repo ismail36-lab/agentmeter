@@ -377,44 +377,103 @@ export async function POST(req: NextRequest) {
 
     const nowIso = new Date().toISOString();
 
-    // 5. Construct log payload — user_id is explicitly set from authenticated API Key owner
+    // 5. Construct sanitized log payload matching strict columns in usage_logs schema
     const effectiveUserId = userId || apiKeyRecord?.user_id || null;
-    const logPayload = {
+
+    const sanitizedPayload: Record<string, any> = {
       user_id: effectiveUserId,
-      provider: provider,
       model: modelKey,
-      input_tokens: pTokens,
-      output_tokens: cTokens,
-      cached_tokens: cachedTokens,
-      cache_creation_tokens: cacheCreationTokens,
-      environment: envTag,
-      agent_name: agentTag || "default-agent",
-      end_user_id: endUserTag,
-      session_id: sessionIdTag,
-      metadata: metadata || {
+      prompt_tokens: pTokens,
+      completion_tokens: cTokens,
+      total_tokens: totalTokens,
+      cost_usd: roundedCost,
+      raw_payload: {
+        provider,
         environment: envTag,
         agent_name: agentTag || "default-agent",
+        end_user_id: endUserTag,
         ...(sessionIdTag && { session_id: sessionIdTag }),
+        cached_tokens: cachedTokens,
+        cache_creation_tokens: cacheCreationTokens,
+        is_estimated: isEstimated,
+        latency_ms: Number(body.latency_ms || body.latency) || 100,
+        metadata: metadata || {},
       },
-      total_cost_usd: roundedCost,
-      is_estimated: isEstimated,
-      latency_ms: Number(body.latency_ms || body.latency) || 100,
-      status_code: 200,
-      timestamp: nowIso,
-      created_at: nowIso,
     };
 
-    // Insert into usage_logs table using supabaseAdmin (bypasses RLS with service-role key)
-    const { data: logData, error: logError } = await supabaseAdmin
+    console.log("[telemetry-ingest] Inserting sanitized log payload:", JSON.stringify(sanitizedPayload));
+
+    // Primary insert attempt with sanitized schema columns
+    let { data: logData, error: logError } = await supabaseAdmin
       .from("usage_logs")
-      .insert([logPayload])
+      .insert([sanitizedPayload])
       .select()
       .single();
 
     if (logError) {
-      console.error("[telemetry-ingest] Database insert error into usage_logs:", logError.message);
+      console.error(
+        "[telemetry-ingest] Primary insert error into usage_logs:",
+        logError.message,
+        "| Details:",
+        logError.details,
+        "| Hint:",
+        logError.hint,
+        "| Code:",
+        logError.code
+      );
+
+      // Fallback attempt with total_cost_usd and input_tokens / output_tokens columns if column schema varies
+      if (logError.code === "PGRST204" || logError.message?.toLowerCase().includes("column")) {
+        const fallbackPayload: Record<string, any> = {
+          user_id: effectiveUserId,
+          model: modelKey,
+          prompt_tokens: pTokens,
+          completion_tokens: cTokens,
+          total_tokens: totalTokens,
+          cost_usd: roundedCost,
+          total_cost_usd: roundedCost,
+          cost: roundedCost,
+          input_tokens: pTokens,
+          output_tokens: cTokens,
+          provider,
+          environment: envTag,
+          agent_name: agentTag || "default-agent",
+        };
+
+        console.log("[telemetry-ingest] Retrying insert with fallback payload columns...");
+        const fallbackRes = await supabaseAdmin
+          .from("usage_logs")
+          .insert([fallbackPayload])
+          .select()
+          .single();
+
+        if (!fallbackRes.error) {
+          logData = fallbackRes.data;
+          logError = null;
+        } else {
+          console.error(
+            "[telemetry-ingest] Fallback insert error:",
+            fallbackRes.error.message,
+            "| Details:",
+            fallbackRes.error.details,
+            "| Hint:",
+            fallbackRes.error.hint,
+            "| Code:",
+            fallbackRes.error.code
+          );
+        }
+      }
+    }
+
+    if (logError) {
+      const fullErrorMsg = logError.details ? `${logError.message} (${logError.details})` : logError.message;
       return NextResponse.json(
-        { error: `Database write failed: ${logError.message}` },
+        {
+          error: `Database write failed: ${fullErrorMsg}`,
+          details: logError.details || null,
+          hint: logError.hint || null,
+          code: logError.code || null,
+        },
         { status: 500, headers: getCorsHeaders() }
       );
     }

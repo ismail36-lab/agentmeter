@@ -74,15 +74,19 @@ export async function GET(req: NextRequest) {
 
     // Standardize log fields: created_at, model, prompt_tokens, completion_tokens, total_tokens, cost, is_estimated
     const mappedLogs = logs.map((log) => {
+      const rawPayload = log.raw_payload || log.metadata || {};
       const pTokens = Number(log.prompt_tokens ?? log.input_tokens ?? 0);
       const cTokens = Number(log.completion_tokens ?? log.output_tokens ?? 0);
       const tTokens = Number(log.total_tokens ?? (pTokens + cTokens));
-      const costVal = Number(log.cost ?? log.total_cost_usd ?? 0);
+      const costVal = Number(log.cost_usd ?? log.total_cost_usd ?? log.cost ?? 0);
       const modelName = String(log.model || "other").toLowerCase().trim();
 
-      const isExplicitlyEstimated = log.is_estimated === true || log.metadata?.is_estimated === true;
+      const isExplicitlyEstimated = log.is_estimated === true || rawPayload.is_estimated === true;
       const isUnknownWithoutCost = !KNOWN_MODELS.has(modelName) && costVal === 0;
       const isEstimated = isExplicitlyEstimated || isUnknownWithoutCost;
+
+      const env = log.environment || rawPayload.environment || rawPayload.metadata?.environment || "production";
+      const agent = log.agent_name || rawPayload.agent_name || rawPayload.metadata?.agent_name || "default-agent";
 
       return {
         id: log.id,
@@ -92,11 +96,13 @@ export async function GET(req: NextRequest) {
         completion_tokens: cTokens,
         total_tokens: tTokens,
         cost: costVal,
+        cost_usd: costVal,
         total_cost_usd: costVal,
         is_estimated: isEstimated,
         user_id: log.user_id,
-        environment: log.environment || log.metadata?.environment || "production",
-        agent_name: log.agent_name || log.metadata?.agent_name || "default-agent",
+        environment: env,
+        agent_name: agent,
+        raw_payload: rawPayload,
       };
     });
 
