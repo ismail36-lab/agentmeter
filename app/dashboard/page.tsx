@@ -466,6 +466,61 @@ export default function Dashboard() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Supabase Realtime channel subscription for live streaming of usage_logs INSERTS
+  useEffect(() => {
+    console.log("[realtime] Subscribing to usage_logs INSERT stream...");
+    const channel = supabase
+      .channel("usage_logs_realtime_stream")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "usage_logs",
+        },
+        (payload) => {
+          console.log("[realtime] Live INSERT event received on usage_logs:", payload.new);
+          const newRow = payload.new;
+          if (newRow) {
+            const pTokens = Number(newRow.prompt_tokens ?? newRow.input_tokens ?? 0);
+            const cTokens = Number(newRow.completion_tokens ?? newRow.output_tokens ?? 0);
+            const tTokens = Number(newRow.total_tokens ?? (pTokens + cTokens));
+            const costVal = Number(newRow.total_cost_usd ?? newRow.cost ?? 0);
+
+            const realtimeLogItem: UsageLog = {
+              id: newRow.id || "log_" + Date.now(),
+              created_at: newRow.created_at || newRow.timestamp || new Date().toISOString(),
+              model: newRow.model || "gpt-4o",
+              prompt_tokens: pTokens,
+              completion_tokens: cTokens,
+              total_tokens: tTokens,
+              cost: costVal,
+              total_cost_usd: costVal,
+              is_estimated: Boolean(newRow.is_estimated),
+              environment: newRow.environment || newRow.metadata?.environment || "production",
+              agent_name: newRow.agent_name || newRow.metadata?.agent_name || "default-agent",
+              user_id: newRow.user_id,
+            };
+
+            setLogs((prev) => {
+              if (prev.some((l) => l.id === realtimeLogItem.id)) return prev;
+              return [realtimeLogItem, ...prev];
+            });
+
+            // Revalidate metrics & plan details so charts update concurrently
+            fetchMetrics();
+            fetchPlanDetails();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Handle Create API Key
   const handleCreateKey = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -590,10 +645,30 @@ export default function Dashboard() {
       setTestResult(data);
 
       if (res.ok && data.success) {
-        // Refetch logs, metrics, and plan details concurrently so charts, tables, and subscription quotas update live instantly
+        // Optimistically prepend the payload + generated log_id directly to the active log table's local state so it appears instantly
+        const optimisticLogItem: UsageLog = {
+          id: data.log_id || "log_" + Date.now(),
+          created_at: data.timestamp || new Date().toISOString(),
+          model: data.model || testModel,
+          prompt_tokens: Number(data.prompt_tokens ?? testPromptTokens),
+          completion_tokens: Number(data.completion_tokens ?? testCompletionTokens),
+          total_tokens: Number(data.total_tokens ?? (testPromptTokens + testCompletionTokens)),
+          cost: Number(data.calculated_cost ?? 0),
+          total_cost_usd: Number(data.calculated_cost ?? 0),
+          is_estimated: Boolean(data.is_estimated),
+          environment: data.environment || "production",
+          agent_name: data.agent_name || "default-agent",
+          user_id: userId || undefined,
+        };
+
+        setLogs((prevLogs) => {
+          if (prevLogs.some((l) => l.id === optimisticLogItem.id)) return prevLogs;
+          return [optimisticLogItem, ...prevLogs];
+        });
+
+        // Refetch metrics and plan details concurrently so charts & quotas update live
         await Promise.all([
           fetchMetrics(),
-          fetchLogs(userId),
           fetchPlanDetails(),
         ]);
       }

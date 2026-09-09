@@ -377,9 +377,10 @@ export async function POST(req: NextRequest) {
 
     const nowIso = new Date().toISOString();
 
-    // 5. Construct log payload — agent_name defaults to 'default-agent' if not supplied
+    // 5. Construct log payload — user_id is explicitly set from authenticated API Key owner
+    const effectiveUserId = userId || apiKeyRecord?.user_id || null;
     const logPayload = {
-      user_id: userId,
+      user_id: effectiveUserId,
       provider: provider,
       model: modelKey,
       input_tokens: pTokens,
@@ -403,42 +404,22 @@ export async function POST(req: NextRequest) {
       created_at: nowIso,
     };
 
-    let logId = "log_" + Date.now() + "_" + Math.random().toString(36).substring(2, 8);
+    // Insert into usage_logs table using supabaseAdmin (bypasses RLS with service-role key)
+    const { data: logData, error: logError } = await supabaseAdmin
+      .from("usage_logs")
+      .insert([logPayload])
+      .select()
+      .single();
 
-    try {
-      // Insert into usage_logs table
-      const { data: logData, error: logError } = await supabaseAdmin
-        .from("usage_logs")
-        .insert([logPayload])
-        .select()
-        .single();
-
-      if (logError) {
-        console.warn("Supabase usage_logs insert notice:", logError.message);
-        // Fallback/secondary insert into telemetry_logs table
-        try {
-          const { data: tData } = await supabaseAdmin
-            .from("telemetry_logs")
-            .insert([
-              {
-                ...logPayload,
-                cost: roundedCost,
-                total_tokens: totalTokens,
-                prompt_tokens: pTokens,
-                completion_tokens: cTokens,
-                is_estimated: isEstimated,
-              },
-            ])
-            .select()
-            .single();
-          if (tData?.id) logId = tData.id;
-        } catch {}
-      } else if (logData && logData.id) {
-        logId = logData.id;
-      }
-    } catch (err) {
-      console.warn("Supabase log insert exception:", err);
+    if (logError) {
+      console.error("[telemetry-ingest] Database insert error into usage_logs:", logError.message);
+      return NextResponse.json(
+        { error: `Database write failed: ${logError.message}` },
+        { status: 500, headers: getCorsHeaders() }
+      );
     }
+
+    const logId = logData?.id || "log_" + Date.now();
 
     // 6. Return response
     return NextResponse.json(
