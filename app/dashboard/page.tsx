@@ -540,19 +540,29 @@ export default function Dashboard() {
 
   // Handle Ingestion API Test Payload Submission
   const handleSendTestTelemetry = async () => {
-    if (!testApiKey) {
-      setTestResult({ error: "No API key selected. Please generate an API Key first." });
+    const apiKeyToSend = testApiKey.trim();
+    if (!apiKeyToSend) {
+      setTestResult({ error: "No API key specified. Please enter or generate an API Key first." });
+      return;
+    }
+
+    if (apiKeyToSend.includes("...")) {
+      setTestResult({
+        error: "Invalid API Key: You are sending a truncated display placeholder (containing '...'). Please paste the full secret key (mx_live_...) returned when the key was created.",
+      });
       return;
     }
 
     setIsSendingTest(true);
     setTestResult(null);
     try {
+      console.log("[tester-ui] Sending test telemetry request using x-api-key header for key:", apiKeyToSend.slice(0, 12) + "...");
       const res = await fetch("/api/v1/telemetry", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${testApiKey}`,
+          "x-api-key": apiKeyToSend,
+          Authorization: `Bearer ${apiKeyToSend}`,
         },
         body: JSON.stringify({
           model: testModel,
@@ -563,6 +573,7 @@ export default function Dashboard() {
       });
 
       const data = await res.json();
+      console.log("[tester-ui] Telemetry ingestion response:", data);
       setTestResult(data);
 
       if (res.ok && data.success) {
@@ -571,6 +582,7 @@ export default function Dashboard() {
         await fetchLogs(userId);
       }
     } catch (err: any) {
+      console.error("[tester-ui] Test telemetry request failed:", err);
       setTestResult({ error: "Request Failed", details: err.message });
     } finally {
       setIsSendingTest(false);
@@ -1115,25 +1127,43 @@ export default function Dashboard() {
 
             <div className="space-y-3 font-mono text-xs">
               <div>
-                <label className="block text-zinc-500 mb-1">API Key to Use</label>
-                <select
-                  value={testApiKey}
-                  onChange={(e) => setTestApiKey(e.target.value)}
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg p-2 text-zinc-200 focus:outline-none focus:border-zinc-600 transition-colors"
-                >
-                  {apiKeys.length === 0 ? (
-                    <option value="">No keys available — Generate key above</option>
-                  ) : (
-                    apiKeys.map((k) => (
-                      // Use fullKey (real secret) as the option value so the tester sends the
-                      // correct raw token — its SHA-256 hash matches api_keys.key_hash in Supabase.
-                      // Fall back to k.key only for legacy keys that were never hashed.
-                      <option key={k.id} value={k.fullKey || k.key}>
-                        {k.name} ({k.key.startsWith("mx_") ? k.key.slice(0, 16) : k.key.slice(0, 12)}…)
-                      </option>
-                    ))
+                <label className="block text-zinc-500 mb-1">API Key to Use (x-api-key)</label>
+                <div className="space-y-2">
+                  {apiKeys.length > 0 && (
+                    <select
+                      onChange={(e) => {
+                        const selectedId = e.target.value;
+                        const foundKey = apiKeys.find((k) => k.id === selectedId);
+                        if (foundKey) {
+                          const valToUse = foundKey.fullKey || (foundKey.key && !foundKey.key.includes("...") ? foundKey.key : "");
+                          setTestApiKey(valToUse);
+                        }
+                      }}
+                      defaultValue=""
+                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-zinc-300 focus:outline-none focus:border-indigo-500/60 transition-colors text-xs font-mono"
+                    >
+                      <option value="" disabled>-- Select Key to Fill --</option>
+                      {apiKeys.map((k) => (
+                        <option key={k.id} value={k.id}>
+                          {k.name} ({k.display_prefix || (k.key ? k.key.slice(0, 12) : "mx_live_")}…) {k.fullKey ? "✓ Secret Ready" : ""}
+                        </option>
+                      ))}
+                    </select>
                   )}
-                </select>
+
+                  <input
+                    type="text"
+                    value={testApiKey}
+                    onChange={(e) => setTestApiKey(e.target.value)}
+                    placeholder="mx_live_... (Paste full plain-text API key)"
+                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 transition-colors font-mono text-xs"
+                  />
+                  {testApiKey && testApiKey.includes("...") && (
+                    <p className="text-[11px] font-sans text-amber-400">
+                      ⚠️ Truncated placeholder detected. Paste your full raw <code className="font-mono text-amber-300">mx_live_...</code> secret key to authenticate.
+                    </p>
+                  )}
+                </div>
               </div>
 
               <div>

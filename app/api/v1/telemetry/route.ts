@@ -28,39 +28,47 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Extract API Key from headers
+    // 1. Extract API Key from headers (prefer x-api-key, fallback to Authorization: Bearer)
     const authHeader = req.headers.get("authorization");
     const xApiKey = req.headers.get("x-api-key");
 
     let apiKey = "";
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      apiKey = authHeader.substring(7).trim();
-    } else if (xApiKey) {
+    if (xApiKey && xApiKey.trim()) {
       apiKey = xApiKey.trim();
+    } else if (authHeader && authHeader.startsWith("Bearer ")) {
+      apiKey = authHeader.substring(7).trim();
+    } else if (authHeader) {
+      apiKey = authHeader.trim();
     }
+
+    // Strip any accidental wrapping quotes
+    apiKey = apiKey.replace(/^["']|["']$/g, "").trim();
+
+    console.log("[telemetry-auth] Request received.");
+    console.log("[telemetry-auth] Exact incoming API key:", apiKey);
 
     if (!apiKey) {
+      console.log("[telemetry-auth] Validation failed: Missing API Key");
       return NextResponse.json(
-        { error: "Unauthorized: Missing API Key in Authorization header or x-api-key" },
+        { error: "Unauthorized: Missing API Key in x-api-key header or Authorization header" },
         { status: 401, headers: getCorsHeaders() }
       );
     }
 
-    // 2. Hash the raw token with SHA-256 and validate against `api_keys.key_hash` (with fallback for legacy keys)
-    // Guard: if the key looks like a masked display string (e.g. "mx_live_XXXX...XXXX"), the hash will
-    // never match. The Dashboard Tester should always send the full raw secret returned at key creation.
+    // 2. Hash the raw token with SHA-256 and validate against `api_keys.key_hash`
     if (apiKey.includes("...")) {
       console.warn(
-        "[telemetry] Received a masked/truncated API key (contains '...'). " +
-        "The Tester UI must send the full raw secret, not the display placeholder. " +
-        "Key prefix received: " + apiKey.slice(0, 20)
+        "[telemetry-auth] Validation failed: Received a masked/truncated API key placeholder (contains '...'). " +
+        "Key received: " + apiKey
       );
       return NextResponse.json(
-        { error: "Unauthorized: Invalid API Key — received a masked placeholder instead of the full secret. Copy the full key shown at generation time." },
+        { error: "Unauthorized: Invalid API Key — received a masked placeholder instead of the full secret key. Please send the full mx_live_... key." },
         { status: 401, headers: getCorsHeaders() }
       );
     }
+
     const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
+    console.log("[telemetry-auth] Computed SHA-256 key_hash:", keyHash);
 
     let apiKeyRecord: {
       id?: string;
@@ -82,9 +90,16 @@ export async function POST(req: NextRequest) {
         .eq("key_hash", keyHash)
         .maybeSingle();
 
+      console.log("[telemetry-auth] Primary DB query by key_hash result:", {
+        found: Boolean(hashData),
+        data: hashData ? { id: hashData.id, name: hashData.name, user_id: hashData.user_id, status: hashData.status, is_active: hashData.is_active } : null,
+        error: hashError ? hashError.message : null,
+      });
+
       let data = hashData;
 
       if (!data && !hashError) {
+        console.log("[telemetry-auth] key_hash lookup missed; trying fallback lookup by raw key column...");
         // Secondary fallback lookup: search by raw key column for legacy am_ keys or unhashed keys
         const { data: legacyData, error: legacyError } = await supabaseAdmin
           .from("api_keys")
@@ -92,34 +107,39 @@ export async function POST(req: NextRequest) {
           .eq("key", apiKey)
           .maybeSingle();
 
-        if (legacyError) {
-          console.warn("Supabase legacy key query notice:", legacyError.message);
-        }
+        console.log("[telemetry-auth] Fallback raw key lookup result:", {
+          found: Boolean(legacyData),
+          data: legacyData ? { id: legacyData.id, name: legacyData.name } : null,
+          error: legacyError ? legacyError.message : null,
+        });
+
         data = legacyData;
       } else if (hashError) {
-        console.warn("Supabase api_keys key_hash query notice:", hashError.message);
+        console.warn("[telemetry-auth] Supabase api_keys key_hash query notice:", hashError.message);
       }
 
       if (data) {
         const isActive = data.is_active !== false && data.status !== "inactive";
         if (isActive) {
+          console.log("[telemetry-auth] Authentication SUCCESSFUL for key ID:", data.id, "(user:", data.user_id, ")");
           apiKeyRecord = data;
           userId = data.user_id ?? null;
         } else {
+          console.log("[telemetry-auth] Authentication FAILED: API Key is inactive/suspended");
           return NextResponse.json(
             { error: "Unauthorized: API Key is inactive" },
             { status: 401, headers: getCorsHeaders() }
           );
         }
       } else {
-        // Key not found in DB
+        console.log("[telemetry-auth] Authentication FAILED: Key hash not found in DB");
         return NextResponse.json(
           { error: "Unauthorized: Invalid or inactive API Key" },
           { status: 401, headers: getCorsHeaders() }
         );
       }
     } catch (err) {
-      console.warn("API key verification notice:", err);
+      console.warn("[telemetry-auth] API key verification exception:", err);
       return NextResponse.json(
         { error: "Unauthorized: Key validation failed" },
         { status: 401, headers: getCorsHeaders() }
