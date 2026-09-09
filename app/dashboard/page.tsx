@@ -294,6 +294,7 @@ export default function Dashboard() {
   const [testPromptTokens, setTestPromptTokens] = useState<number>(1500);
   const [testCompletionTokens, setTestCompletionTokens] = useState<number>(450);
   const [testApiKey, setTestApiKey] = useState<string>("");
+  const [inMemorySecrets, setInMemorySecrets] = useState<Record<string, string>>({});
   const [isSendingTest, setIsSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
 
@@ -340,10 +341,9 @@ export default function Dashboard() {
         const activeKeys = (data.keys || []).filter((k: ApiKeyItem) => k.is_active);
         setApiKeys(activeKeys);
 
-        // Auto-select first key for playground if testApiKey is empty.
-        // Prefer fullKey (real secret) over the masked display key.
+        // Auto-select first key ID for playground if testApiKey is empty.
         if (activeKeys.length > 0 && !testApiKey) {
-          setTestApiKey(activeKeys[0].fullKey || activeKeys[0].key);
+          setTestApiKey(activeKeys[0].id);
         }
       }
     } catch (err) {
@@ -540,15 +540,19 @@ export default function Dashboard() {
 
   // Handle Ingestion API Test Payload Submission
   const handleSendTestTelemetry = async () => {
-    const apiKeyToSend = testApiKey.trim();
-    if (!apiKeyToSend) {
-      setTestResult({ error: "No API key specified. Please enter or generate an API Key first." });
+    if (!testApiKey) {
+      setTestResult({ error: "No API key selected. Please generate an API Key first." });
       return;
     }
 
-    if (apiKeyToSend.includes("...")) {
+    // Look up selected key and its in-memory raw secret key
+    const selectedKeyObj = apiKeys.find((k) => k.id === testApiKey || k.key === testApiKey);
+    const keyId = selectedKeyObj?.id || testApiKey;
+    const rawSecret = inMemorySecrets[keyId] || selectedKeyObj?.fullKey;
+
+    if (!rawSecret || rawSecret.includes("...")) {
       setTestResult({
-        error: "Invalid API Key: You are sending a truncated display placeholder (containing '...'). Please paste the full secret key (mx_live_...) returned when the key was created.",
+        error: "Secret key not in memory. For security, API keys are shown only once when generated and stored as SHA-256 hashes in the database. Please generate a new key above to test immediately.",
       });
       return;
     }
@@ -556,13 +560,13 @@ export default function Dashboard() {
     setIsSendingTest(true);
     setTestResult(null);
     try {
-      console.log("[tester-ui] Sending test telemetry request using x-api-key header for key:", apiKeyToSend.slice(0, 12) + "...");
+      console.log(`[tester-ui] Sending test telemetry request using in-memory secret key for ID ${keyId}...`);
       const res = await fetch("/api/v1/telemetry", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "x-api-key": apiKeyToSend,
-          Authorization: `Bearer ${apiKeyToSend}`,
+          "x-api-key": rawSecret,
+          Authorization: `Bearer ${rawSecret}`,
         },
         body: JSON.stringify({
           model: testModel,
@@ -1094,14 +1098,16 @@ export default function Dashboard() {
           onRefresh={fetchApiKeys}
           onKeyCreated={(newKey) => {
             setApiKeys((prev) => [newKey, ...prev]);
-            // Use the real secret (fullKey) so the SHA-256 hash matches what's stored in api_keys.key_hash
-            setTestApiKey(newKey.fullKey || newKey.key);
+            if (newKey.fullKey) {
+              setInMemorySecrets((prev) => ({ ...prev, [newKey.id]: newKey.fullKey! }));
+            }
+            setTestApiKey(newKey.id);
           }}
           onKeyRevoked={(keyId) => {
             setApiKeys((prev) => prev.filter((k) => k.id !== keyId));
-            if (testApiKey && apiKeys.find((k) => k.id === keyId)?.key === testApiKey) {
+            if (testApiKey === keyId) {
               const remaining = apiKeys.filter((k) => k.id !== keyId);
-              setTestApiKey(remaining.length > 0 ? remaining[0].key : "");
+              setTestApiKey(remaining.length > 0 ? remaining[0].id : "");
             }
           }}
         />
@@ -1127,43 +1133,33 @@ export default function Dashboard() {
 
             <div className="space-y-3 font-mono text-xs">
               <div>
-                <label className="block text-zinc-500 mb-1">API Key to Use (x-api-key)</label>
-                <div className="space-y-2">
-                  {apiKeys.length > 0 && (
-                    <select
-                      onChange={(e) => {
-                        const selectedId = e.target.value;
-                        const foundKey = apiKeys.find((k) => k.id === selectedId);
-                        if (foundKey) {
-                          const valToUse = foundKey.fullKey || (foundKey.key && !foundKey.key.includes("...") ? foundKey.key : "");
-                          setTestApiKey(valToUse);
-                        }
-                      }}
-                      defaultValue=""
-                      className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-zinc-300 focus:outline-none focus:border-indigo-500/60 transition-colors text-xs font-mono"
-                    >
-                      <option value="" disabled>-- Select Key to Fill --</option>
-                      {apiKeys.map((k) => (
+                <label className="block text-zinc-500 mb-1 font-sans">API Key to Use</label>
+                <select
+                  value={testApiKey}
+                  onChange={(e) => setTestApiKey(e.target.value)}
+                  className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-zinc-200 focus:outline-none focus:border-indigo-500/60 transition-colors text-xs font-mono"
+                >
+                  {apiKeys.length === 0 ? (
+                    <option value="">No keys available — Generate key above</option>
+                  ) : (
+                    apiKeys.map((k) => {
+                      const prefix = k.display_prefix || (k.key && !k.key.includes("...") ? k.key.slice(0, 12) : "mx_live_");
+                      const suffix = k.display_suffix || (k.key && !k.key.includes("...") ? k.key.slice(-4) : "");
+                      const maskedDisplay = `${prefix}...${suffix}`;
+                      const hasSecret = Boolean(inMemorySecrets[k.id] || k.fullKey);
+                      return (
                         <option key={k.id} value={k.id}>
-                          {k.name} ({k.display_prefix || (k.key ? k.key.slice(0, 12) : "mx_live_")}…) {k.fullKey ? "✓ Secret Ready" : ""}
+                          {k.name} ({maskedDisplay}) {hasSecret ? "✓ Ready to test" : ""}
                         </option>
-                      ))}
-                    </select>
+                      );
+                    })
                   )}
-
-                  <input
-                    type="text"
-                    value={testApiKey}
-                    onChange={(e) => setTestApiKey(e.target.value)}
-                    placeholder="mx_live_... (Paste full plain-text API key)"
-                    className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2 text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-indigo-500/60 transition-colors font-mono text-xs"
-                  />
-                  {testApiKey && testApiKey.includes("...") && (
-                    <p className="text-[11px] font-sans text-amber-400">
-                      ⚠️ Truncated placeholder detected. Paste your full raw <code className="font-mono text-amber-300">mx_live_...</code> secret key to authenticate.
-                    </p>
-                  )}
-                </div>
+                </select>
+                {testApiKey && !inMemorySecrets[testApiKey] && !apiKeys.find(k => k.id === testApiKey)?.fullKey && (
+                  <p className="text-[11px] font-sans text-zinc-500 mt-1.5 leading-relaxed">
+                    Note: Unhashed secret key for this key is not stored in browser memory. Generate a new key above for live testing.
+                  </p>
+                )}
               </div>
 
               <div>
