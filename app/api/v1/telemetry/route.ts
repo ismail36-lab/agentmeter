@@ -6,6 +6,7 @@ import { createClient } from "@/utils/supabase/server";
 import { getCacheReadMultiplier } from "@/lib/pricing";
 import crypto from "crypto";
 import { sendBudgetAlert } from "@/lib/budget-alerts";
+import { sendAnomalyAlert } from "@/lib/anomaly-alerts";
 
 export const dynamic = "force-dynamic";
 
@@ -520,6 +521,30 @@ export async function POST(req: NextRequest) {
       status_code: Number(body.status_code || 200),
       is_estimated: Boolean(body.is_estimated ?? false),
     };
+
+    // 4c. Anomaly & Error Monitoring Check: cost spike or error rate spike
+    const spikeThreshold = Number(apiKeyRecord?.spike_threshold_usd ?? 1.0);
+    const statusCode = Number(body.status_code || 200);
+
+    if (calculatedCost >= spikeThreshold || statusCode >= 500) {
+      (async () => {
+        const ownerEmail = await getOwnerEmail(userId);
+        if (ownerEmail) {
+          await sendAnomalyAlert({
+            to: ownerEmail,
+            projectName: apiKeyRecord?.name || "Meterix Project",
+            model: String(body.model),
+            estimatedCost: calculatedCost,
+            spikeThresholdUSD: spikeThreshold,
+            timestamp: nowIso,
+            userId,
+            reason: statusCode >= 500
+              ? `HTTP ${statusCode} Error Spike`
+              : `Single Request Cost ($${calculatedCost.toFixed(4)}) exceeded threshold ($${spikeThreshold.toFixed(4)})`,
+          });
+        }
+      })().catch((err) => console.error("[anomaly-alerts] Non-blocking anomaly email dispatch error:", err));
+    }
 
     const { data: logData, error: logError } = await supabaseAdmin
       .from("usage_logs")

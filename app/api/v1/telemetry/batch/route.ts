@@ -4,6 +4,7 @@ import { dispatchWebhookAlert } from "@/lib/webhooks";
 import { getCacheReadMultiplier } from "@/lib/pricing";
 import crypto from "crypto";
 import { sendBudgetAlert } from "@/lib/budget-alerts";
+import { sendAnomalyAlert } from "@/lib/anomaly-alerts";
 
 export const dynamic = "force-dynamic";
 
@@ -296,6 +297,25 @@ async function processEvent(
     };
 
     let logId = "log_" + Date.now() + "_" + Math.random().toString(36).substring(2, 8);
+
+    // Anomaly cost spike check for batch event
+    if (roundedCost >= 1.0) {
+      (async () => {
+        const ownerEmail = await getOwnerEmail(userId);
+        if (ownerEmail) {
+          await sendAnomalyAlert({
+            to: ownerEmail,
+            projectName: "Meterix Batch Project",
+            model: modelKey,
+            estimatedCost: roundedCost,
+            spikeThresholdUSD: 1.0,
+            timestamp: nowIso,
+            userId,
+            reason: `Batch event cost ($${roundedCost.toFixed(4)}) exceeded spike threshold ($1.0000)`,
+          });
+        }
+      })().catch((err) => console.error("[anomaly-alerts] Non-blocking batch anomaly email dispatch error:", err));
+    }
 
     const { data: logData, error: logError } = await supabaseAdmin
       .from("usage_logs")
