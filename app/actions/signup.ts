@@ -103,7 +103,6 @@ export async function signupUserAction(input: SignupActionInput): Promise<Signup
     let emailErrorMsg: string | undefined;
 
     const apiKey = process.env.RESEND_API_KEY;
-    const fromAddress = process.env.RESEND_FROM_EMAIL || "Meterix <support@meterix.dev>";
 
     if (!apiKey) {
       console.warn("[signup-action] Warning: RESEND_API_KEY is not configured.");
@@ -112,7 +111,7 @@ export async function signupUserAction(input: SignupActionInput): Promise<Signup
       try {
         const resend = new Resend(apiKey);
         const { data: resendData, error: resendError } = await resend.emails.send({
-          from: fromAddress,
+          from: "Meterix <support@meterix.dev>",
           to: [userRegisteredEmail],
           subject: "Welcome to Meterix!",
           html: `

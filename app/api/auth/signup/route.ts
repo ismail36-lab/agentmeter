@@ -116,7 +116,6 @@ export async function POST(req: NextRequest): Promise<NextResponse<SignupRespons
     let emailErrorMsg: string | undefined;
 
     const apiKey = process.env.RESEND_API_KEY;
-    const fromAddress = process.env.RESEND_FROM_EMAIL || "Meterix <support@meterix.dev>";
 
     if (!apiKey) {
       console.warn("[signup-api] Warning: RESEND_API_KEY environment variable is missing.");
@@ -125,7 +124,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<SignupRespons
       try {
         const resend = new Resend(apiKey);
         const { data: resendData, error: resendError } = await resend.emails.send({
-          from: fromAddress,
+          from: "Meterix <support@meterix.dev>",
           to: [userRegisteredEmail],
           subject: "Welcome to Meterix!",
           html: `
