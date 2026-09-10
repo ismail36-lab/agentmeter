@@ -81,20 +81,39 @@ export default function LoginPage() {
           window.location.href = getNextDestination();
         }
       } else {
-        const { error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { plan: urlPlan },
+        const res = await fetch("/api/auth/signup", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
           },
+          body: JSON.stringify({
+            email,
+            password,
+            plan: urlPlan,
+          }),
         });
-        if (error) {
-          setError(error.message);
+
+        const signupData = await res.json().catch(() => null);
+
+        if (!res.ok || !signupData?.success) {
+          setError(signupData?.details || signupData?.error || "Registration failed. Please try again.");
           setIsLoading(false);
           return;
         }
+
+        // Try signing in automatically after successful registration
+        const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
+        if (!signInError && signInData?.session) {
+          syncSessionCookie(signInData.session);
+          if (!hasRedirectedRef.current) {
+            hasRedirectedRef.current = true;
+            window.location.href = getNextDestination();
+            return;
+          }
+        }
+
         setSuccessMsg(
-          "Account created! Check your email to confirm your address, then sign in."
+          "Account created successfully! A welcome email has been sent to your inbox."
         );
         setMode("login");
         setIsLoading(false);
