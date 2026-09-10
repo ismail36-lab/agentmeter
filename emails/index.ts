@@ -18,3 +18,7 @@ export type { EnterpriseLeadInternalNotificationEmailProps } from "./EnterpriseL
 
 export { StaleModelAlertEmail } from "./StaleModelAlertEmail";
 export type { StaleModelAlertEmailProps, StaleModel } from "./StaleModelAlertEmail";
+
+export { EnterpriseLeadEmail } from "./EnterpriseLeadEmail";
+export type { EnterpriseLeadEmailProps } from "./EnterpriseLeadEmail";
+

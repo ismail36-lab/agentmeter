@@ -31,9 +31,7 @@ export function StaleModelAlertEmail({ staleCount, models }: StaleModelAlertEmai
   return (
     <Html>
       <Head />
-      <Preview>
-        ⚠️ [Meterix Admin] {staleCount} model pricing record{staleCount !== 1 ? "s" : ""} require manual verification
-      </Preview>
+      <Preview>{`⚠️ [Meterix Admin] ${staleCount} model pricing record${staleCount !== 1 ? "s" : ""} require manual verification`}</Preview>
       <Body style={body}>
         <Container style={container}>
           {/* Header */}
