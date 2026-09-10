@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { dispatchWebhookAlert } from "@/lib/webhooks";
+import { getCacheReadMultiplier } from "@/lib/pricing";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -155,7 +156,7 @@ function computeCost(
 ): { cost: number; cacheSavings: number } {
   const inputRate = pricing.input_price_per_million / 1_000_000;
   const outputRate = pricing.output_price_per_million / 1_000_000;
-  const cacheReadMultiplier = pricing.provider === "anthropic" ? 0.10 : 0.50;
+  const cacheReadMultiplier = getCacheReadMultiplier(pricing.provider, pricing.model);
   const cacheReadRate = inputRate * cacheReadMultiplier;
   const cacheWriteRate = inputRate * 1.25;
 

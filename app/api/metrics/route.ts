@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { getCacheReadMultiplier } from "@/lib/pricing";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -125,8 +126,8 @@ export async function GET(req: NextRequest) {
       const pricing = pricingRatesMap[modelKey];
       const provider = pricing?.provider || String(log.provider || "").toLowerCase();
 
-      const inputRate = pricing?.inputRate ?? (provider === "anthropic" ? 3.0 / 1_000_000 : 2.5 / 1_000_000);
-      const cacheReadMultiplier = provider === "anthropic" ? 0.10 : 0.50;
+      const inputRate = pricing?.inputRate ?? (provider === "anthropic" ? 3.0 / 1_000_000 : (provider === "gemini" || provider === "google" || modelKey.startsWith("gemini") ? 1.25 / 1_000_000 : 2.5 / 1_000_000));
+      const cacheReadMultiplier = getCacheReadMultiplier(provider, modelKey);
       const cacheReadRate = inputRate * cacheReadMultiplier;
       const savingsPerToken = inputRate - cacheReadRate;
 

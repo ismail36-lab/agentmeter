@@ -3,6 +3,7 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { dispatchWebhookAlert } from "@/lib/webhooks";
 import { verifyApiKey } from "@/lib/auth/meterix";
 import { createClient } from "@/utils/supabase/server";
+import { getCacheReadMultiplier } from "@/lib/pricing";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -321,7 +322,7 @@ export async function POST(req: NextRequest) {
       const inputRate = activePricing.input_price_per_million / 1_000_000;
       const outputRate = activePricing.output_price_per_million / 1_000_000;
 
-      const cacheReadMultiplier = provider === "anthropic" ? 0.10 : 0.50;
+      const cacheReadMultiplier = getCacheReadMultiplier(provider, modelKey);
       const cacheReadRate = inputRate * cacheReadMultiplier;
       const cacheWriteRate = inputRate * 1.25;
 
@@ -346,7 +347,7 @@ export async function POST(req: NextRequest) {
       const inputRate = fallbackPricing.input_price_per_million / 1_000_000;
       const outputRate = fallbackPricing.output_price_per_million / 1_000_000;
 
-      const cacheReadMultiplier = provider === "anthropic" ? 0.10 : 0.50;
+      const cacheReadMultiplier = getCacheReadMultiplier(provider, modelKey);
       const cacheReadRate = inputRate * cacheReadMultiplier;
       const cacheWriteRate = inputRate * 1.25;
 
