@@ -10,6 +10,8 @@ export interface AuthenticatedApiKey {
   budget_cap_usd?: number | null;
   current_period_spend_usd?: number | null;
   budget_action?: string | null;
+  budget_cap_action?: string | null;
+  budget_alert_sent?: boolean;
   [key: string]: any;
 }
 

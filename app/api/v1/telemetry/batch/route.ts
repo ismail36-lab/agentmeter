@@ -3,8 +3,19 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { dispatchWebhookAlert } from "@/lib/webhooks";
 import { getCacheReadMultiplier } from "@/lib/pricing";
 import crypto from "crypto";
+import { sendBudgetAlert } from "@/lib/budget-alerts";
 
 export const dynamic = "force-dynamic";
+
+async function getOwnerEmail(userId: string | null): Promise<string | null> {
+  if (!userId) return null;
+  try {
+    const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
+    return userData?.user?.email || null;
+  } catch (e) {
+    return null;
+  }
+}
 
 const MAX_BATCH_SIZE = 200;
 
@@ -38,7 +49,7 @@ async function resolveApiKey(
   // Primary: hash lookup
   const { data: hashData } = await supabaseAdmin
     .from("api_keys")
-    .select("id, user_id, is_active, status, budget_cap_usd, current_period_spend_usd, budget_action")
+    .select("id, name, user_id, is_active, status, budget_cap_usd, current_period_spend_usd, budget_action, budget_cap_action, budget_alert_sent")
     .eq("key_hash", keyHash)
     .maybeSingle();
 
@@ -48,7 +59,7 @@ async function resolveApiKey(
     // Fallback: raw key (legacy am_ keys)
     const { data: legacyData } = await supabaseAdmin
       .from("api_keys")
-      .select("id, user_id, is_active, status, budget_cap_usd, current_period_spend_usd, budget_action")
+      .select("id, name, user_id, is_active, status, budget_cap_usd, current_period_spend_usd, budget_action, budget_cap_action, budget_alert_sent")
       .eq("key", apiKey)
       .maybeSingle();
     data = legacyData;
@@ -397,17 +408,42 @@ export async function POST(req: NextRequest) {
         ? Number(apiKeyRecord.budget_cap_usd)
         : null;
       const currentSpend = Number(apiKeyRecord.current_period_spend_usd ?? 0);
-      const action = String(apiKeyRecord.budget_action || "block_new_logs").toLowerCase();
+      const action = String(apiKeyRecord.budget_action || apiKeyRecord.budget_cap_action || "block_new_logs").toLowerCase();
       const newSpend = Number((currentSpend + totalBatchSpend).toFixed(6));
+      const budgetAlertSent = Boolean(apiKeyRecord.budget_alert_sent);
+      const projectName = apiKeyRecord.name || "API Key Project";
 
       if (budgetCap !== null && budgetCap > 0 && newSpend > budgetCap) {
         dispatchWebhookAlert({
           event: "budget_exceeded",
-          apiKeyName: apiKeyRecord.name || "API Key",
+          apiKeyName: projectName,
           currentSpend: newSpend,
           budgetCap,
           userId,
         }).catch(() => {/* silent */});
+
+        if (action === "block_new_logs" || action === "revoke_key") {
+          (async () => {
+            const ownerEmail = await getOwnerEmail(userId);
+            if (ownerEmail) {
+              await sendBudgetAlert({
+                to: ownerEmail,
+                projectName,
+                currentSpend: newSpend,
+                budgetCap,
+                actionType: action,
+                isCritical: true,
+              });
+            }
+          })().catch((err) => console.error("[budget-alerts] Non-blocking critical email dispatch error:", err));
+
+          if (!budgetAlertSent) {
+            await supabaseAdmin
+              .from("api_keys")
+              .update({ budget_alert_sent: true })
+              .eq("id", apiKeyRecord.id);
+          }
+        }
 
         if (action === "revoke_key") {
           await supabaseAdmin
@@ -433,14 +469,33 @@ export async function POST(req: NextRequest) {
           );
         }
       } else {
-        if (budgetCap !== null && budgetCap > 0 && newSpend >= budgetCap * 0.8 && currentSpend < budgetCap * 0.8) {
+        if (budgetCap !== null && budgetCap > 0 && newSpend >= budgetCap * 0.8 && !budgetAlertSent) {
+          await supabaseAdmin
+            .from("api_keys")
+            .update({ budget_alert_sent: true })
+            .eq("id", apiKeyRecord.id);
+
           dispatchWebhookAlert({
             event: "budget_alert",
-            apiKeyName: apiKeyRecord.name || "API Key",
+            apiKeyName: projectName,
             currentSpend: newSpend,
             budgetCap,
             userId,
           }).catch(() => {/* silent */});
+
+          (async () => {
+            const ownerEmail = await getOwnerEmail(userId);
+            if (ownerEmail) {
+              await sendBudgetAlert({
+                to: ownerEmail,
+                projectName,
+                currentSpend: newSpend,
+                budgetCap,
+                actionType: action,
+                isCritical: false,
+              });
+            }
+          })().catch((err) => console.error("[budget-alerts] Non-blocking warning email dispatch error:", err));
         }
 
         await supabaseAdmin

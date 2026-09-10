@@ -5,8 +5,19 @@ import { verifyApiKey } from "@/lib/auth/meterix";
 import { createClient } from "@/utils/supabase/server";
 import { getCacheReadMultiplier } from "@/lib/pricing";
 import crypto from "crypto";
+import { sendBudgetAlert } from "@/lib/budget-alerts";
 
 export const dynamic = "force-dynamic";
+
+async function getOwnerEmail(userId: string | null): Promise<string | null> {
+  if (!userId) return null;
+  try {
+    const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
+    return userData?.user?.email || null;
+  } catch (e) {
+    return null;
+  }
+}
 
 /** Shape returned by the model_pricing table */
 type ModelPricingRow = {
@@ -387,18 +398,44 @@ export async function POST(req: NextRequest) {
         ? Number(apiKeyRecord.budget_cap_usd)
         : null;
       const currentSpend = Number(apiKeyRecord.current_period_spend_usd ?? 0);
-      const action = String(apiKeyRecord.budget_action || "block_new_logs").toLowerCase();
+      const action = String(apiKeyRecord.budget_action || apiKeyRecord.budget_cap_action || "block_new_logs").toLowerCase();
       const newSpend = Number((currentSpend + roundedCost).toFixed(6));
+      const budgetAlertSent = Boolean(apiKeyRecord.budget_alert_sent);
+      const projectName = apiKeyRecord.name || "API Key Project";
 
       if (budgetCap !== null && budgetCap > 0 && newSpend > budgetCap) {
         // Trigger background webhook notification
         dispatchWebhookAlert({
           event: "budget_exceeded",
-          apiKeyName: apiKeyRecord.name || "API Key",
+          apiKeyName: projectName,
           currentSpend: newSpend,
           budgetCap,
           userId,
         }).catch(() => {/* silent */});
+
+        // Send critical alert email asynchronously if action is block_new_logs or revoke_key
+        if (action === "block_new_logs" || action === "revoke_key") {
+          (async () => {
+            const ownerEmail = await getOwnerEmail(userId);
+            if (ownerEmail) {
+              await sendBudgetAlert({
+                to: ownerEmail,
+                projectName,
+                currentSpend: newSpend,
+                budgetCap,
+                actionType: action,
+                isCritical: true,
+              });
+            }
+          })().catch((err) => console.error("[budget-alerts] Non-blocking critical email dispatch error:", err));
+
+          if (!budgetAlertSent) {
+            await supabaseAdmin
+              .from("api_keys")
+              .update({ budget_alert_sent: true })
+              .eq("id", apiKeyRecord.id);
+          }
+        }
 
         if (action === "revoke_key") {
           // Suspend API key instantly
@@ -426,15 +463,36 @@ export async function POST(req: NextRequest) {
           );
         }
       } else {
-        // Check if 80%+ threshold warning alert should fire
-        if (budgetCap !== null && budgetCap > 0 && newSpend >= budgetCap * 0.8 && currentSpend < budgetCap * 0.8) {
+        // Check if 80%+ or 100% threshold warning alert should fire and budget_alert_sent is false
+        if (budgetCap !== null && budgetCap > 0 && newSpend >= budgetCap * 0.8 && !budgetAlertSent) {
+          // Mark budget_alert_sent in DB
+          await supabaseAdmin
+            .from("api_keys")
+            .update({ budget_alert_sent: true })
+            .eq("id", apiKeyRecord.id);
+
           dispatchWebhookAlert({
             event: "budget_alert",
-            apiKeyName: apiKeyRecord.name || "API Key",
+            apiKeyName: projectName,
             currentSpend: newSpend,
             budgetCap,
             userId,
           }).catch(() => {/* silent */});
+
+          // Send warning alert email asynchronously
+          (async () => {
+            const ownerEmail = await getOwnerEmail(userId);
+            if (ownerEmail) {
+              await sendBudgetAlert({
+                to: ownerEmail,
+                projectName,
+                currentSpend: newSpend,
+                budgetCap,
+                actionType: action,
+                isCritical: false,
+              });
+            }
+          })().catch((err) => console.error("[budget-alerts] Non-blocking warning email dispatch error:", err));
         }
 
         // Within budget cap: update current_period_spend_usd
