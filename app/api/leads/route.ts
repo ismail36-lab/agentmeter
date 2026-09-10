@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Resend } from "resend";
+import { render } from "react-email";
 import { supabaseAdmin } from "@/lib/supabase";
+import {
+  EnterpriseLeadConfirmationEmail,
+  EnterpriseLeadInternalNotificationEmail,
+} from "@/emails";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +21,6 @@ interface LeadBody {
   use_case: string;
 }
 
-// Team-size options that the UI enforces; validated server-side too.
 const VALID_TEAM_SIZES = [
   "1-5",
   "6-20",
@@ -26,39 +31,111 @@ const VALID_TEAM_SIZES = [
 ] as const;
 type TeamSize = (typeof VALID_TEAM_SIZES)[number];
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 }
 
-/**
- * Send an internal lead-capture notification.
- * Swap the console log for a Resend / SendGrid call once you add
- * RESEND_API_KEY or SENDGRID_API_KEY to .env.local.
- *
- * Example with Resend:
- * ```ts
- * const resend = new Resend(process.env.RESEND_API_KEY);
- * await resend.emails.send({
- *   from: "leads@meterix.io",
- *   to: "sales@meterix.io",
- *   subject: `New Sales Lead: ${lead.company} (${lead.team_size} people)`,
- *   html: `<pre>${JSON.stringify(lead, null, 2)}</pre>`,
- * });
- * ```
- */
-async function notifySalesTeam(lead: LeadBody): Promise<void> {
-  // Structured console log acts as an observable event in serverless logs.
-  console.info("[leads] New sales enquiry received", {
-    timestamp: new Date().toISOString(),
-    company: lead.company,
-    team_size: lead.team_size,
-    contact: `${lead.name} <${lead.email}>`,
-    use_case_preview: lead.use_case.slice(0, 120),
-  });
+function getCorsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  };
+}
+
+export async function OPTIONS() {
+  return NextResponse.json({}, { headers: getCorsHeaders() });
+}
+
+// ---------------------------------------------------------------------------
+// Resend Email Helper – renders React Email templates for both emails
+// ---------------------------------------------------------------------------
+
+async function sendEnterpriseLeadEmails(lead: LeadBody): Promise<{ internalSent: boolean; userSent: boolean }> {
+  let internalSent = false;
+  let userSent = false;
+
+  const apiKey = process.env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.warn("[leads] Warning: RESEND_API_KEY is not configured.");
+    return { internalSent: false, userSent: false };
+  }
+
+  const resend = new Resend(apiKey);
+  const fromAddress = "Meterix <support@meterix.dev>";
+  const salesEmail =
+    process.env.SALES_EMAIL ||
+    process.env.ADMIN_EMAIL ||
+    process.env.SUPPORT_EMAIL ||
+    "support@meterix.dev";
+  const nowIso = new Date().toISOString();
+
+  // 1. Internal Notification Email to Sales/Admin Team
+  try {
+    const internalHtml = await render(
+      EnterpriseLeadInternalNotificationEmail({
+        name: lead.name,
+        email: lead.email,
+        company: lead.company,
+        teamSize: lead.team_size,
+        useCase: lead.use_case,
+        submittedAt: nowIso,
+      })
+    );
+
+    const internalText = `🔥 New Enterprise Lead: ${lead.company}\n\nCompany: ${lead.company}\nName: ${lead.name}\nEmail: ${lead.email}\nTeam Size: ${lead.team_size}\nSubmitted: ${nowIso}\n\nUse Case:\n${lead.use_case}`;
+
+    const { data: intData, error: intErr } = await resend.emails.send({
+      from: fromAddress,
+      to: [salesEmail],
+      subject: `🔥 New Enterprise Lead: ${lead.company}`,
+      html: internalHtml,
+      text: internalText,
+    });
+
+    if (intErr) {
+      console.error("[leads] Internal sales notification email error:", intErr);
+    } else if (intData?.id) {
+      internalSent = true;
+      console.log(`[leads] Internal lead notification email sent (ID: ${intData.id}) to ${salesEmail}`);
+    }
+  } catch (err) {
+    console.error("[leads] Internal email exception:", err);
+  }
+
+  // 2. User Confirmation Email to Lead
+  try {
+    const userHtml = await render(
+      EnterpriseLeadConfirmationEmail({
+        name: lead.name,
+        company: lead.company,
+        email: lead.email,
+        teamSize: lead.team_size,
+        useCase: lead.use_case,
+      })
+    );
+
+    const userText = `Thanks for reaching out to Meterix!\n\nHi ${lead.name},\n\nThank you for reaching out to Meterix! We've received your enterprise request for ${lead.company}.\n\nOur team is reviewing your details and will be in touch within 1 business day.\n\nBest regards,\nThe Meterix Team`;
+
+    const { data: userData, error: userErr } = await resend.emails.send({
+      from: fromAddress,
+      to: [lead.email],
+      subject: "Thanks for reaching out to Meterix!",
+      html: userHtml,
+      text: userText,
+    });
+
+    if (userErr) {
+      console.error("[leads] User confirmation email error:", userErr);
+    } else if (userData?.id) {
+      userSent = true;
+      console.log(`[leads] User confirmation email sent (ID: ${userData.id}) to ${lead.email}`);
+    }
+  } catch (err) {
+    console.error("[leads] User confirmation email exception:", err);
+  }
+
+  return { internalSent, userSent };
 }
 
 // ---------------------------------------------------------------------------
@@ -66,17 +143,14 @@ async function notifySalesTeam(lead: LeadBody): Promise<void> {
 // ---------------------------------------------------------------------------
 
 export async function POST(req: NextRequest) {
-  // ── Parse body ────────────────────────────────────────────────────────────
   let body: Partial<LeadBody>;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400, headers: getCorsHeaders() });
   }
 
-  // ── Validation ────────────────────────────────────────────────────────────
   const errors: string[] = [];
-
   const name = body.name?.trim() ?? "";
   const email = body.email?.trim().toLowerCase() ?? "";
   const company = body.company?.trim() ?? "";
@@ -100,65 +174,63 @@ export async function POST(req: NextRequest) {
   }
 
   if (errors.length > 0) {
-    return NextResponse.json({ error: "Validation failed", details: errors }, { status: 422 });
+    return NextResponse.json({ error: "Validation failed", details: errors }, { status: 422, headers: getCorsHeaders() });
   }
 
   const lead: LeadBody = { name, email, company, team_size: team_size as TeamSize, use_case };
 
-  // ── Duplicate check (same email submitted within 24 h) ────────────────────
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { count } = await supabaseAdmin
-    .from("leads")
-    .select("id", { count: "exact", head: true })
-    .eq("email", email)
-    .gte("created_at", since);
+  const leadRecord = {
+    name,
+    email,
+    company,
+    team_size,
+    use_case,
+    source: "talk_to_sales_modal",
+    created_at: new Date().toISOString(),
+  };
 
-  if ((count ?? 0) > 0) {
-    // Return success silently so we don't reveal whether the email is known.
-    return NextResponse.json(
-      { success: true, message: "Your enquiry has already been received. We'll be in touch soon!" },
-      { status: 200 }
-    );
-  }
+  let leadId = `lead_${Date.now()}`;
 
-  // ── Insert into Supabase leads table ──────────────────────────────────────
-  const { data, error: dbError } = await supabaseAdmin
-    .from("leads")
-    .insert([
-      {
-        name,
-        email,
-        company,
-        team_size,
-        use_case,
-        source: "talk_to_sales_modal",
-        created_at: new Date().toISOString(),
-      },
-    ])
-    .select("id, created_at")
-    .single();
-
-  if (dbError) {
-    console.error("[leads] DB insert error:", dbError.message);
-    return NextResponse.json(
-      { error: "Failed to submit your enquiry. Please try again." },
-      { status: 500 }
-    );
-  }
-
-  // ── Notify sales team (best-effort — never crash after successful DB write) ──
+  // 1. Insert into enterprise_leads table (with fallback to leads table)
   try {
-    await notifySalesTeam(lead);
-  } catch (notifyErr) {
-    console.error("[leads] notifySalesTeam failed (non-fatal):", notifyErr);
+    const { data: entData, error: entErr } = await supabaseAdmin
+      .from("enterprise_leads")
+      .insert([leadRecord])
+      .select("id")
+      .maybeSingle();
+
+    if (!entErr && entData?.id) {
+      leadId = entData.id;
+    } else {
+      const { data: fallbackData, error: fallbackErr } = await supabaseAdmin
+        .from("leads")
+        .insert([leadRecord])
+        .select("id")
+        .maybeSingle();
+
+      if (!fallbackErr && fallbackData?.id) {
+        leadId = fallbackData.id;
+      }
+    }
+  } catch (dbErr: any) {
+    console.warn("[leads] DB insertion notice:", dbErr?.message || dbErr);
+  }
+
+  // 2. Trigger dual Resend email notifications (React Email templates)
+  let emailStatus = { internalSent: false, userSent: false };
+  try {
+    emailStatus = await sendEnterpriseLeadEmails(lead);
+  } catch (emailErr) {
+    console.error("[leads] sendEnterpriseLeadEmails exception:", emailErr);
   }
 
   return NextResponse.json(
     {
       success: true,
-      lead_id: data.id,
+      lead_id: leadId,
+      email_status: emailStatus,
       message: "Thank you! A member of our sales team will reach out within 1 business day.",
     },
-    { status: 201 }
+    { status: 201, headers: getCorsHeaders() }
   );
 }

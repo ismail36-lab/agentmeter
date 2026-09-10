@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
+import { render } from "react-email";
 import { getSupabaseAdminClient } from "@/lib/supabase";
+import { WelcomeEmail } from "@/emails/WelcomeEmail";
 
 export const dynamic = "force-dynamic";
 
@@ -110,7 +112,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<SignupRespons
     const userId = authData.user.id;
     const userRegisteredEmail = authData.user.email || cleanEmail;
 
-    // 3. Resend Welcome Email Dispatch
+    // 3. Resend Welcome Email using WelcomeEmail React Email template
     let emailSent = false;
     let emailId: string | undefined;
     let emailErrorMsg: string | undefined;
@@ -123,30 +125,17 @@ export async function POST(req: NextRequest): Promise<NextResponse<SignupRespons
     } else {
       try {
         const resend = new Resend(apiKey);
+
+        // Render React Email template to HTML
+        const html = await render(
+          WelcomeEmail({ userEmail: userRegisteredEmail, plan: userPlan })
+        );
+
         const { data: resendData, error: resendError } = await resend.emails.send({
           from: "Meterix <support@meterix.dev>",
           to: [userRegisteredEmail],
           subject: "Welcome to Meterix!",
-          html: `
-            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background-color: #090d16; color: #f4f4f5; border-radius: 12px; border: 1px solid #27272a;">
-              <div style="text-align: center; margin-bottom: 24px;">
-                <h1 style="color: #6366f1; margin: 0; font-size: 24px; font-weight: 700;">Meterix</h1>
-                <p style="color: #a1a1aa; font-size: 14px; margin-top: 4px;">Developer AI Metering & Telemetry Platform</p>
-              </div>
-              <div style="background-color: #18181b; padding: 20px; border-radius: 8px; border: 1px solid #27272a;">
-                <h2 style="color: #f4f4f5; font-size: 18px; margin-top: 0;">Welcome aboard!</h2>
-                <p style="color: #d4d4d8; font-size: 14px; line-height: 1.6;">
-                  Thank you for creating an account with <strong>Meterix</strong>. Your registration is complete and your account is ready to track and meter your AI applications.
-                </p>
-                <p style="color: #d4d4d8; font-size: 14px; line-height: 1.6;">
-                  Selected Plan: <span style="color: #818cf8; font-weight: 600;">${userPlan.toUpperCase()}</span>
-                </p>
-              </div>
-              <div style="margin-top: 24px; font-size: 12px; color: #71717a; text-align: center;">
-                If you have any questions or need support, reply directly to this email or contact us at <a href="mailto:support@meterix.dev" style="color: #818cf8; text-decoration: none;">support@meterix.dev</a>.
-              </div>
-            </div>
-          `,
+          html,
           text: `Welcome to Meterix!\n\nThank you for creating an account with Meterix. Your registration is complete.\n\nSelected Plan: ${userPlan.toUpperCase()}\n\nIf you need support, reply to this email or contact support@meterix.dev.`,
         });
 

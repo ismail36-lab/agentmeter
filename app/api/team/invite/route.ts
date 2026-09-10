@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
+import { render } from "react-email";
 import { supabaseAdmin } from "@/lib/supabase";
 import { createClient } from "@/utils/supabase/server";
 import { authorizeRole, Role } from "@/lib/rbac";
+import { TeamInviteEmail } from "@/emails/TeamInviteEmail";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -155,7 +157,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<InviteRespons
     const origin = req.headers.get("origin") || `${protocol}://${host}`;
     const inviteLink = `${origin}/accept-invite?token=${token}`;
 
-    // 6. Send invitation email via Resend
+    // 6. Send invitation email via Resend using TeamInviteEmail React Email template
     let emailSent = false;
     let emailId: string | undefined;
     let emailError: string | undefined;
@@ -170,40 +172,21 @@ export async function POST(req: NextRequest): Promise<NextResponse<InviteRespons
         const resend = new Resend(apiKey);
         const inviterName = user.email ? user.email : "A team member";
 
+        // Render React Email template to HTML
+        const html = await render(
+          TeamInviteEmail({
+            inviterName,
+            inviteeEmail: cleanEmail,
+            role: targetRole,
+            inviteLink,
+          })
+        );
+
         const { data: resendData, error: resendError } = await resend.emails.send({
           from: "Meterix <support@meterix.dev>",
           to: [cleanEmail],
           subject: "You've been invited to join a project on Meterix",
-          html: `
-            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background-color: #090d16; color: #f4f4f5; border-radius: 12px; border: 1px solid #27272a;">
-              <div style="text-align: center; margin-bottom: 24px;">
-                <h1 style="color: #6366f1; margin: 0; font-size: 24px; font-weight: 700;">Meterix</h1>
-                <p style="color: #a1a1aa; font-size: 14px; margin-top: 4px;">Developer AI Metering & Telemetry Platform</p>
-              </div>
-
-              <div style="background-color: #18181b; padding: 24px; border-radius: 8px; border: 1px solid #27272a; margin-bottom: 24px;">
-                <h2 style="color: #f4f4f5; font-size: 18px; margin-top: 0; margin-bottom: 12px;">You're Invited!</h2>
-                <p style="color: #d4d4d8; font-size: 14px; line-height: 1.6; margin-bottom: 16px;">
-                  <strong>${inviterName}</strong> has invited you to collaborate on Meterix as a <span style="color: #818cf8; font-weight: 600; text-transform: uppercase;">${targetRole}</span>.
-                </p>
-
-                <div style="text-align: center; margin: 28px 0;">
-                  <a href="${inviteLink}" style="background-color: #4f46e5; color: #ffffff; padding: 12px 28px; border-radius: 8px; font-weight: 600; font-size: 14px; text-decoration: none; display: inline-block;">
-                    Accept Invitation
-                  </a>
-                </div>
-
-                <p style="color: #71717a; font-size: 12px; line-height: 1.5; margin-bottom: 0;">
-                  If the button above does not work, copy and paste this link into your web browser:<br/>
-                  <a href="${inviteLink}" style="color: #818cf8; word-break: break-all;">${inviteLink}</a>
-                </p>
-              </div>
-
-              <div style="text-align: center; font-size: 12px; color: #71717a;">
-                This invitation link will expire in 7 days. If you did not expect this invitation, you can safely ignore this email.
-              </div>
-            </div>
-          `,
+          html,
           text: `You've been invited to join a project on Meterix!\n\n${inviterName} has invited you as a ${targetRole.toUpperCase()}.\n\nClick the link below to accept your invitation:\n${inviteLink}\n\nThis link expires in 7 days.`,
         });
 

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
+import { render } from "react-email";
 import { supabaseAdmin } from "@/lib/supabase";
+import { StaleModelAlertEmail } from "@/emails/StaleModelAlertEmail";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +59,7 @@ async function handleCheckModelStaleness(req: NextRequest) {
     let emailId: string | undefined;
     let emailError: string | undefined;
 
-    // 3. If stale models found, send Resend admin notification
+    // 3. If stale models found, send Resend admin notification using StaleModelAlertEmail template
     if (staleCount > 0) {
       const apiKey = process.env.RESEND_API_KEY;
       const recipient = process.env.ADMIN_EMAIL || process.env.SUPPORT_EMAIL || "support@meterix.dev";
@@ -69,31 +71,25 @@ async function handleCheckModelStaleness(req: NextRequest) {
         try {
           const resend = new Resend(apiKey);
 
-          // Build HTML list / table of stale models
-          const tableRowsHtml = staleModels
-            .map((m) => {
-              const name = m.model_name || m.model || "Unknown Model";
-              const provider = m.provider || "custom";
-              const verifiedAt = m.last_verified_at
-                ? new Date(m.last_verified_at).toLocaleDateString("en-US", {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                  })
-                : "Never Verified";
-              const inRate = `$${Number(m.input_price_per_million || 0).toFixed(2)}/1M`;
-              const outRate = `$${Number(m.output_price_per_million || 0).toFixed(2)}/1M`;
+          // Build typed model list for the React Email template
+          const templateModels = staleModels.map((m) => ({
+            modelName: m.model_name || m.model || "Unknown Model",
+            provider: m.provider || "custom",
+            inputRate: `$${Number(m.input_price_per_million || 0).toFixed(2)}/1M`,
+            outputRate: `$${Number(m.output_price_per_million || 0).toFixed(2)}/1M`,
+            lastVerifiedAt: m.last_verified_at
+              ? new Date(m.last_verified_at).toLocaleDateString("en-US", {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                })
+              : "Never Verified",
+          }));
 
-              return `
-                <tr style="border-bottom: 1px solid #27272a;">
-                  <td style="padding: 10px; color: #f4f4f5; font-weight: 600;">${name}</td>
-                  <td style="padding: 10px; color: #a1a1aa;">${provider}</td>
-                  <td style="padding: 10px; color: #818cf8; font-family: monospace;">${inRate} / ${outRate}</td>
-                  <td style="padding: 10px; color: #ef4444; font-weight: 500;">${verifiedAt}</td>
-                </tr>
-              `;
-            })
-            .join("");
+          // Render React Email template to HTML
+          const html = await render(
+            StaleModelAlertEmail({ staleCount, models: templateModels })
+          );
 
           const textList = staleModels
             .map(
@@ -104,47 +100,13 @@ async function handleCheckModelStaleness(req: NextRequest) {
             )
             .join("\n");
 
-          const htmlContent = `
-            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 650px; margin: 0 auto; padding: 24px; background-color: #090d16; color: #f4f4f5; border-radius: 12px; border: 1px solid #f59e0b;">
-              <div style="text-align: center; margin-bottom: 24px;">
-                <h1 style="color: #f59e0b; margin: 0; font-size: 22px; font-weight: 700;">⚠️ Stale Model Pricing Alert</h1>
-                <p style="color: #a1a1aa; font-size: 14px; margin-top: 4px;">Meterix Automated Admin Verification System</p>
-              </div>
-
-              <div style="background-color: #18181b; padding: 20px; border-radius: 8px; border: 1px solid #27272a; margin-bottom: 20px;">
-                <p style="color: #d4d4d8; font-size: 14px; line-height: 1.6; margin-top: 0;">
-                  The following <strong>${staleCount}</strong> active model pricing record(s) have not been verified within the last 30 days and require manual verification:
-                </p>
-
-                <table style="width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; text-align: left;">
-                  <thead>
-                    <tr style="border-bottom: 1px solid #3f3f46; color: #a1a1aa;">
-                      <th style="padding: 8px 10px;">Model Name</th>
-                      <th style="padding: 8px 10px;">Provider</th>
-                      <th style="padding: 8px 10px;">Current Rate (In/Out)</th>
-                      <th style="padding: 8px 10px;">Last Verified</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${tableRowsHtml}
-                  </tbody>
-                </table>
-              </div>
-
-              <div style="text-align: center; margin-top: 24px; color: #71717a; font-size: 12px;">
-                <p style="margin-bottom: 4px;">Please review provider documentation and update the <code>model_pricing</code> table in Supabase.</p>
-                <p style="margin: 0;">Meterix Engine • support@meterix.dev</p>
-              </div>
-            </div>
-          `;
-
           const textContent = `⚠️ [Meterix Admin] Stale Model Pricing Alert\n\nThe following ${staleCount} model pricing record(s) have not been verified within 30 days:\n\n${textList}\n\nPlease check provider docs and update model_pricing in Supabase.`;
 
           const { data: resendData, error: resendError } = await resend.emails.send({
             from: "Meterix <support@meterix.dev>",
             to: [recipient],
             subject: "⚠️ [Meterix Admin] Stale Model Pricing Alert",
-            html: htmlContent,
+            html,
             text: textContent,
           });
 
