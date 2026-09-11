@@ -4,9 +4,9 @@ import React, { useState, useEffect, useRef } from "react";
 import { Zap, Mail, Lock, Eye, EyeOff, Loader2, ShieldCheck, AlertCircle } from "lucide-react";
 import { supabase, syncSessionCookie } from "@/lib/supabase";
 
-type AuthMode = "login" | "signup";
+export type AuthMode = "login" | "signup";
 
-export default function LoginPage({ initialMode = "login" }: { initialMode?: AuthMode }) {
+export function LoginPageContent({ initialMode = "login" }: { initialMode?: AuthMode }) {
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -326,4 +326,8 @@ export default function LoginPage({ initialMode = "login" }: { initialMode?: Aut
       </div>
     </div>
   );
+}
+
+export default function LoginPage() {
+  return <LoginPageContent initialMode="login" />;
 }
