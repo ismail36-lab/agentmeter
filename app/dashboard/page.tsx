@@ -440,11 +440,25 @@ export default function Dashboard() {
     router.push("/login");
   };
 
-  // Bootstrap session check & load data
+  // Bootstrap session check & load data safely
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      const user = data.session?.user;
-      if (user) {
+    async function initDashboardSession() {
+      try {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !sessionData?.session) {
+          await supabase.auth.signOut().catch(() => {});
+          router.push("/login");
+          return;
+        }
+
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError || !userData?.user) {
+          await supabase.auth.signOut().catch(() => {});
+          router.push("/login");
+          return;
+        }
+
+        const user = userData.user;
         setUserId(user.id);
         setUserEmail(user.email ?? null);
         // Use the authenticated user's ID as the default project scope.
@@ -453,8 +467,14 @@ export default function Dashboard() {
         fetchMetrics();
         fetchLogs(user.id);
         fetchPlanDetails();
+      } catch (err) {
+        console.warn("Dashboard session initialization error:", err);
+        await supabase.auth.signOut().catch(() => {});
+        router.push("/login");
       }
-    });
+    }
+
+    initDashboardSession();
     // Model pricing can be fetched independently of auth (public table)
     fetchModelPricing();
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -1,4 +1,5 @@
 import { createClient as createSupabaseClient, SupabaseClient } from "@supabase/supabase-js";
+import { createBrowserClient as createSsrBrowserClient } from "@supabase/ssr";
 import type { NextRequest } from "next/server";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
@@ -122,11 +123,11 @@ export async function getUserFromRequest(req: NextRequest): Promise<{ id: string
  */
 export function createBrowserClient(): SupabaseClient {
   if (typeof window === "undefined") {
-    return createSupabaseClient(supabaseUrl, supabaseAnonKey);
+    return createSsrBrowserClient(supabaseUrl, supabaseAnonKey);
   }
 
   if (!globalThis.__supabaseBrowserClient) {
-    const client = createSupabaseClient(supabaseUrl, supabaseAnonKey);
+    const client = createSsrBrowserClient(supabaseUrl, supabaseAnonKey);
     globalThis.__supabaseBrowserClient = client;
 
     // Automatically sync auth state to cookie whenever session changes
@@ -134,12 +135,19 @@ export function createBrowserClient(): SupabaseClient {
       syncSessionCookie(session);
     });
 
-    // Sync initial session on creation if available
-    client.auth.getSession().then(({ data }) => {
-      if (data.session) {
-        syncSessionCookie(data.session);
-      }
-    });
+    // Sync initial session on creation if available (handled safely)
+    client.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (data?.session && !error) {
+          syncSessionCookie(data.session);
+        } else if (error) {
+          syncSessionCookie(null);
+        }
+      })
+      .catch(() => {
+        syncSessionCookie(null);
+      });
   }
 
   return globalThis.__supabaseBrowserClient;

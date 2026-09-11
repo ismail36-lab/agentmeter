@@ -6,8 +6,8 @@ import { supabase, syncSessionCookie } from "@/lib/supabase";
 
 type AuthMode = "login" | "signup";
 
-export default function LoginPage() {
-  const [mode, setMode] = useState<AuthMode>("login");
+export default function LoginPage({ initialMode = "login" }: { initialMode?: AuthMode }) {
+  const [mode, setMode] = useState<AuthMode>(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -29,14 +29,42 @@ export default function LoginPage() {
   useEffect(() => {
     let isMounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!isMounted) return;
-      if (data.session && !hasRedirectedRef.current) {
-        hasRedirectedRef.current = true;
-        syncSessionCookie(data.session);
-        window.location.href = getNextDestination();
+    async function checkInitialSession() {
+      try {
+        const { data, error: sessionErr } = await supabase.auth.getSession();
+        if (!isMounted) return;
+
+        if (sessionErr) {
+          console.warn("Invalid auth session detected on login page:", sessionErr.message);
+          await supabase.auth.signOut().catch(() => {});
+          syncSessionCookie(null);
+          return;
+        }
+
+        if (data?.session && !hasRedirectedRef.current) {
+          // Verify user actually exists in Auth backend (handles deleted user accounts cleanly)
+          const { data: userData, error: userErr } = await supabase.auth.getUser();
+          if (userErr || !userData?.user) {
+            console.warn("Session user no longer exists or is invalid:", userErr?.message);
+            await supabase.auth.signOut().catch(() => {});
+            syncSessionCookie(null);
+            return;
+          }
+
+          hasRedirectedRef.current = true;
+          syncSessionCookie(data.session);
+          window.location.href = getNextDestination();
+        }
+      } catch (err) {
+        console.error("Error during initial session verification:", err);
+        if (isMounted) {
+          await supabase.auth.signOut().catch(() => {});
+          syncSessionCookie(null);
+        }
       }
-    });
+    }
+
+    checkInitialSession();
 
     return () => {
       isMounted = false;

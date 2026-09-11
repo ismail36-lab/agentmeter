@@ -6,9 +6,12 @@ export async function middleware(request: NextRequest) {
     request,
   });
 
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "placeholder_anon_key";
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll() {
@@ -29,19 +32,37 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Refresh Supabase session by calling getUser()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   const { pathname } = request.nextUrl;
 
-  // Prevent infinite loop if already on /login
-  if (pathname.startsWith("/login")) {
+  // Prevent infinite redirect loops if already on login or signup pages
+  const isAuthPage = pathname.startsWith("/login") || pathname.startsWith("/signup");
+
+  let user = null;
+  try {
+    // Refresh Supabase session by calling getUser() safely
+    const { data, error } = await supabase.auth.getUser();
+    if (!error && data?.user) {
+      user = data.user;
+    } else if (error) {
+      // If user is non-existent or deleted, clear stale auth token cookies
+      const sbCookie = request.cookies.getAll().find(
+        (c) => (c.name.startsWith("sb-") && c.name.endsWith("-auth-token")) || c.name === "sb-auth-token"
+      );
+      if (sbCookie) {
+        supabaseResponse.cookies.delete(sbCookie.name);
+      }
+    }
+  } catch (err) {
+    console.warn("Middleware auth verification error:", err);
+    user = null;
+  }
+
+  // Allow access to auth pages without redirecting back to /login
+  if (isAuthPage) {
     return supabaseResponse;
   }
 
-  // Protect /dashboard routes — unauthenticated users are redirected to /login
+  // Protect /dashboard routes — unauthenticated or deleted users are redirected to /login
   const isDashboardPath = pathname === "/dashboard" || pathname.startsWith("/dashboard/");
   if (isDashboardPath && !user) {
     const loginUrl = new URL("/login", request.url);
