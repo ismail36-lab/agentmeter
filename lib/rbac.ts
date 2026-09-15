@@ -71,7 +71,7 @@ export async function authorizeRole(
     };
   }
 
-  let userRole: Role = "owner";
+  let userRole: Role | null = null;
   let hasResolvedRole = false;
 
   // 2. Safely attempt DB lookup on team_members / project_members
@@ -91,18 +91,37 @@ export async function authorizeRole(
     console.warn("[authorizeRole] team_members query skipped/failed:", err);
   }
 
-  // 3. Fallback: inspect user metadata or project ownership context
+  // 3. Fallback: explicitly check project ownership in projects table
   if (!hasResolvedRole) {
-    const metaRole = (user.user_metadata?.role || user.app_metadata?.role) as Role | undefined;
-    if (metaRole && metaRole in ROLE_RANK) {
-      userRole = metaRole;
-    } else {
-      // Default to owner for the user's primary project workspace or authenticated owner
-      userRole = "owner";
+    try {
+      const { data: projData, error: projError } = await supabase
+        .from("projects")
+        .select("owner_id, user_id")
+        .eq("id", projectId)
+        .maybeSingle();
+
+      if (!projError && projData) {
+        const ownerId = projData.owner_id || projData.user_id;
+        if (ownerId && ownerId === user.id) {
+          userRole = "owner";
+          hasResolvedRole = true;
+        }
+      }
+    } catch (err) {
+      console.warn("[authorizeRole] projects ownership check failed:", err);
     }
   }
 
-  // 4. Hierarchy check — the user's rank must be >= the required rank.
+  // 4. Fail-closed: reject authorization if no role record or project ownership is found
+  if (!hasResolvedRole || !userRole) {
+    return {
+      authorized: false,
+      userId: user.id,
+      reason: `Access denied. User ${user.id} has no member or owner role in project ${projectId}`,
+    };
+  }
+
+  // 5. Hierarchy check — the user's rank must be >= the required rank.
   if ((ROLE_RANK[userRole] ?? 0) < (ROLE_RANK[requiredRole] ?? Infinity)) {
     return {
       authorized: false,
