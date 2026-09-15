@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
   const createdAt = new Date().toISOString();
 
   console.log("[key-gen] Generating new API key for user:", user.id);
-  console.log("[key-gen] Exact full raw API key generated:", fullKey);
+  console.log("[key-gen] API key generated:", `${display_prefix}...${display_suffix}`);
   console.log("[key-gen] Computed SHA-256 hash (key_hash):", key_hash);
 
   const insertPayload = {
