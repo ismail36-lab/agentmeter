@@ -4,7 +4,7 @@ async function testTelemetry() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer mx_live_0aa73e80_Yfi4gkEpg8IlWxesWVUJSilH'
+        'Authorization': `Bearer ${process.env.METERIX_TEST_API_KEY || 'mx_test_dummy_key'}`
       },
       body: JSON.stringify({
         model: 'gpt-4o',
