@@ -60,6 +60,13 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleStripeSync(req: NextRequest) {
+  const cronSecret = process.env.CRON_SECRET;
+  const authHeader = req.headers.get("authorization");
+
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const NO_CACHE_HEADERS = {
     "Cache-Control": "no-store, max-age=0",
     "CDN-Cache-Control": "no-store",
