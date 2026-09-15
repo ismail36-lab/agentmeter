@@ -34,13 +34,15 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // 1. Primary lookup: Query Postgres view `session_cost_rollup`
+    // 1. Primary lookup: Query Postgres view `session_cost_rollup` scoped strictly to user.id
     const { data: viewRows, error: viewError } = await supabaseAdmin
       .from("session_cost_rollup")
-      .select("*");
+      .select("*")
+      .eq("user_id", user.id);
 
     if (!viewError && viewRows && viewRows.length > 0) {
-      const formattedFromView: SessionRollupItem[] = viewRows.map((row: any) => {
+      const userViewRows = viewRows.filter((row: any) => row.user_id === user.id);
+      const formattedFromView: SessionRollupItem[] = userViewRows.map((row: any) => {
         const models = Array.isArray(row.models_used)
           ? row.models_used
           : typeof row.models_used === "string"
@@ -70,11 +72,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ success: true, sessions: formattedFromView }, { headers: NO_CACHE_HEADERS });
     }
 
-    // 2. Secondary fallback: Query usage_logs filtered by user_id or orphan logs with non-null session_id
+    // 2. Secondary fallback: Query usage_logs strictly scoped to user.id
     const { data: logs, error: logsError } = await supabaseAdmin
       .from("usage_logs")
       .select("*")
-      .or(`user_id.eq.${user.id},user_id.is.null`)
+      .eq("user_id", user.id)
       .order("created_at", { ascending: true });
 
     if (logsError) {
