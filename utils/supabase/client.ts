@@ -53,4 +53,3 @@ export const createClient = createBrowserClient;
 export const supabase = createBrowserClient();
 
 export default supabase;
-

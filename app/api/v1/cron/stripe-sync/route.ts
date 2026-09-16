@@ -102,8 +102,8 @@ async function handleStripeSync(req: NextRequest) {
           usersList = authUsers.users.map((u) => ({
             id: u.id,
             email: u.email || "user@example.com",
-            stripe_customer_id: (u.user_metadata?.stripe_customer_id as string) || null,
-            plan: String(u.user_metadata?.plan || "free").toLowerCase(),
+            stripe_customer_id: null,
+            plan: "free",
           }));
         }
       } catch (err) {

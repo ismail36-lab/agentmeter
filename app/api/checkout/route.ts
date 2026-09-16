@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
-import { supabaseAdmin } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
@@ -29,23 +28,6 @@ async function handleCheckout(req: NextRequest) {
   }
 
   const requestedPlan = String(plan).toLowerCase();
-
-  // If user is authenticated, optimistically upgrade plan in metadata as a fast-path
-  if (user) {
-    try {
-      const updatedMetadata = {
-        ...(user.user_metadata || {}),
-        plan: requestedPlan,
-        updated_at: new Date().toISOString(),
-      };
-
-      await supabaseAdmin.auth.admin.updateUserById(user.id, {
-        user_metadata: updatedMetadata,
-      });
-    } catch (err) {
-      console.warn("Could not auto-update user metadata plan:", err);
-    }
-  }
 
   // ── Lemon Squeezy Checkout ──────────────────────────────────────────────────
   const lsApiKey = process.env.LEMONSQUEEZY_API_KEY;

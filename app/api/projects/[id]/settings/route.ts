@@ -40,7 +40,7 @@ export async function GET(
     );
   }
 
-  // Resolve user plan (profiles table primary, fallback to user_metadata)
+  // Resolve user plan (profiles table as single source of truth)
   let userPlan = "free";
   try {
     const { data: profile } = await supabaseAdmin
@@ -51,8 +51,6 @@ export async function GET(
 
     if (profile?.plan) {
       userPlan = String(profile.plan).toLowerCase();
-    } else if (user.user_metadata?.plan) {
-      userPlan = String(user.user_metadata.plan).toLowerCase();
     }
   } catch (err) {
     console.warn("[project settings GET] plan check warning:", err);
@@ -121,7 +119,7 @@ export async function PATCH(
     );
   }
 
-  // Resolve user plan
+  // Resolve user plan (profiles table as single source of truth)
   let userPlan = "free";
   try {
     const { data: profile } = await supabaseAdmin
@@ -132,8 +130,6 @@ export async function PATCH(
 
     if (profile?.plan) {
       userPlan = String(profile.plan).toLowerCase();
-    } else if (user.user_metadata?.plan) {
-      userPlan = String(user.user_metadata.plan).toLowerCase();
     }
   } catch (err) {
     console.warn("[project settings PATCH] plan check warning:", err);

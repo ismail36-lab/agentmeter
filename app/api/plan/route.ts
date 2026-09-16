@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Read plan: check public.profiles first (Stripe source of truth), fallback to user_metadata
+    // Read plan: check public.profiles (single source of truth)
     let rawPlan = "free";
 
     const { data: profile } = await supabaseAdmin
@@ -37,8 +37,6 @@ export async function GET(req: NextRequest) {
 
     if (profile?.plan) {
       rawPlan = String(profile.plan).toLowerCase();
-    } else {
-      rawPlan = user.user_metadata?.plan || "free";
     }
 
     const planKey = rawPlan in TIER_LIMITS ? rawPlan : "free";
@@ -67,7 +65,6 @@ export async function GET(req: NextRequest) {
         usage: usageCount,
         percentage,
         remaining,
-        user_metadata: user.user_metadata || {},
       },
       { headers: NO_CACHE_HEADERS }
     );
@@ -96,20 +93,17 @@ export async function POST(req: NextRequest) {
     const requestedPlan = String(body.plan || "free").toLowerCase();
     const newPlan = requestedPlan in TIER_LIMITS ? requestedPlan : "free";
 
-    // Update user_metadata in Supabase Auth
-    const updatedMetadata = {
-      ...(user.user_metadata || {}),
-      plan: newPlan,
-      updated_at: new Date().toISOString(),
-    };
-
-    const { data: updatedUserData, error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(
-      user.id,
-      { user_metadata: updatedMetadata }
-    );
+    // Update profiles table (single source of truth)
+    const { error: updateErr } = await supabaseAdmin
+      .from("profiles")
+      .upsert({
+        id: user.id,
+        plan: newPlan,
+        updated_at: new Date().toISOString(),
+      });
 
     if (updateErr) {
-      console.warn("Error updating user_metadata plan:", updateErr.message);
+      console.warn("Error updating profiles plan:", updateErr.message);
     }
 
     const tier = TIER_LIMITS[newPlan];
@@ -138,7 +132,6 @@ export async function POST(req: NextRequest) {
         usage: usageCount,
         percentage,
         remaining,
-        user_metadata: updatedUserData?.user?.user_metadata || updatedMetadata,
       },
       { headers: NO_CACHE_HEADERS }
     );

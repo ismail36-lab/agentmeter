@@ -83,11 +83,6 @@ async function getUserPlan(userId: string): Promise<string> {
       .eq("id", userId)
       .maybeSingle();
     if (profile?.plan) return String(profile.plan).toLowerCase();
-
-    const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
-    if (userData?.user?.user_metadata?.plan) {
-      return String(userData.user.user_metadata.plan).toLowerCase();
-    }
   } catch {/* silent */}
   return "free";
 }

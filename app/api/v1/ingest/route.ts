@@ -101,7 +101,7 @@ export async function POST(req: NextRequest) {
 
     if (userId) {
       try {
-        // Primary: profiles table (Stripe / LemonSqueezy source of truth)
+        // Single source of truth: profiles table
         const { data: profile } = await supabaseAdmin
           .from("profiles")
           .select("plan")
@@ -110,12 +110,6 @@ export async function POST(req: NextRequest) {
 
         if (profile?.plan) {
           planType = String(profile.plan).toLowerCase();
-        } else {
-          // Fallback: auth user_metadata
-          const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
-          if (userData?.user?.user_metadata?.plan) {
-            planType = String(userData.user.user_metadata.plan).toLowerCase();
-          }
         }
       } catch (err) {
         console.warn("[ingest] plan resolution warning:", err);

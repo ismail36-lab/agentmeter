@@ -148,12 +148,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2b. Quota Limit Enforcement: Check public.profiles first (Stripe-driven plan),
-    //     then fall back to user_metadata plan, then default to 'free'.
+    // 2b. Quota Limit Enforcement: Read plan from public.profiles (single source of truth)
     let userPlan = "free";
     if (userId) {
       try {
-        // Primary: read plan from public.profiles (updated by Stripe webhook)
         const { data: profile } = await supabaseAdmin
           .from("profiles")
           .select("plan")
@@ -162,12 +160,6 @@ export async function POST(req: NextRequest) {
 
         if (profile?.plan) {
           userPlan = String(profile.plan).toLowerCase();
-        } else {
-          // Fallback: read plan from Supabase Auth user_metadata
-          const { data: userData } = await supabaseAdmin.auth.admin.getUserById(userId);
-          if (userData?.user?.user_metadata?.plan) {
-            userPlan = String(userData.user.user_metadata.plan).toLowerCase();
-          }
         }
       } catch (err) {
         console.warn("Could not fetch plan for quota check:", err);
