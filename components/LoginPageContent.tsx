@@ -78,10 +78,6 @@ export function LoginPageContent({ initialMode = "login" }: { initialMode?: Auth
     setIsLoading(true);
 
     try {
-      const urlPlan = typeof window !== "undefined"
-        ? new URLSearchParams(window.location.search).get("plan") || "free"
-        : "free";
-
       if (mode === "login") {
         const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) {
@@ -91,18 +87,6 @@ export function LoginPageContent({ initialMode = "login" }: { initialMode?: Auth
         }
         if (data.session) {
           syncSessionCookie(data.session);
-          if (urlPlan && urlPlan !== "free") {
-            try {
-              await fetch("/api/plan", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  Authorization: `Bearer ${data.session.access_token}`,
-                },
-                body: JSON.stringify({ plan: urlPlan }),
-              });
-            } catch {}
-          }
         }
         if (!hasRedirectedRef.current) {
           hasRedirectedRef.current = true;
@@ -117,7 +101,6 @@ export function LoginPageContent({ initialMode = "login" }: { initialMode?: Auth
           body: JSON.stringify({
             email,
             password,
-            plan: urlPlan,
           }),
         });
 
