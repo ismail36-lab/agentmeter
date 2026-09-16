@@ -74,69 +74,16 @@ export async function GET(req: NextRequest) {
   }
 }
 
-export async function POST(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-  const NO_CACHE_HEADERS = {
-    "Cache-Control": "no-store, max-age=0",
-    "CDN-Cache-Control": "no-store",
-    "Vercel-CDN-Cache-Control": "no-store",
-  };
-
-  if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_CACHE_HEADERS });
-  }
-
-  try {
-    const body = await req.json();
-    const requestedPlan = String(body.plan || "free").toLowerCase();
-    const newPlan = requestedPlan in TIER_LIMITS ? requestedPlan : "free";
-
-    // Update profiles table (single source of truth)
-    const { error: updateErr } = await supabaseAdmin
-      .from("profiles")
-      .upsert({
-        id: user.id,
-        plan: newPlan,
-        updated_at: new Date().toISOString(),
-      });
-
-    if (updateErr) {
-      console.warn("Error updating profiles plan:", updateErr.message);
-    }
-
-    const tier = TIER_LIMITS[newPlan];
-
-    // Count monthly usage
-    const now = new Date();
-    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-
-    const { count } = await supabaseAdmin
-      .from("usage_logs")
-      .select("id", { count: "exact", head: true })
-      .or(`user_id.eq.${user.id},user_id.is.null`)
-      .gte("created_at", firstDayOfMonth);
-
-    const usageCount = count ?? 0;
-    const percentage = Math.min(100, Number(((usageCount / tier.limit) * 100).toFixed(1)));
-    const remaining = Math.max(0, tier.limit - usageCount);
-
-    return NextResponse.json(
-      {
-        success: true,
-        plan: newPlan,
-        tierName: tier.name,
-        limit: tier.limit,
-        limitLabel: tier.label,
-        usage: usageCount,
-        percentage,
-        remaining,
+export async function POST() {
+  return NextResponse.json(
+    { error: "Method not allowed. Plan upgrades must be completed via Lemon Squeezy checkout." },
+    {
+      status: 405,
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+        "CDN-Cache-Control": "no-store",
+        "Vercel-CDN-Cache-Control": "no-store",
       },
-      { headers: NO_CACHE_HEADERS }
-    );
-  } catch (err: any) {
-    console.error("plan POST exception:", err);
-    return NextResponse.json({ error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
-  }
+    }
+  );
 }

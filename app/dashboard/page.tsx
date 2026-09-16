@@ -237,27 +237,21 @@ export default function Dashboard() {
     }
   };
 
-  // Toggle Plan between Free Sandbox & Pro Tier
-  const handleTogglePlan = async () => {
+  // Redirect user to Lemon Squeezy Checkout session
+  const handleUpgradeToPro = async () => {
     setIsSwitchingPlan(true);
     try {
-      const newPlan = planDetails.plan === "pro" ? "free" : "pro";
-      const sessionRes = await supabase.auth.getSession();
-      const token = sessionRes.data.session?.access_token;
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-
-      const res = await fetch("/api/plan", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ plan: newPlan }),
-      });
+      const res = await fetch("/api/checkout?plan=pro");
       if (res.ok) {
         const data = await res.json();
-        if (data.plan) setPlanDetails(data);
+        if (data?.url) {
+          window.location.href = data.url;
+          return;
+        }
       }
-    } catch (err) {
-      console.warn("Could not update plan:", err);
+      window.location.href = "/api/checkout?plan=pro";
+    } catch {
+      window.location.href = "/api/checkout?plan=pro";
     } finally {
       setIsSwitchingPlan(false);
     }
@@ -909,19 +903,10 @@ export default function Dashboard() {
                     )}
                     Manage Subscription
                   </button>
-
-                  <button
-                    onClick={handleTogglePlan}
-                    disabled={isSwitchingPlan}
-                    className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium bg-zinc-800/80 hover:bg-zinc-700/80 text-zinc-300 border border-zinc-700/60 transition-all"
-                  >
-                    {isSwitchingPlan && <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />}
-                    Switch to Free Sandbox
-                  </button>
                 </>
               ) : (
                 <button
-                  onClick={handleTogglePlan}
+                  onClick={handleUpgradeToPro}
                   disabled={isSwitchingPlan}
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition-all shadow-sm"
                 >
@@ -959,7 +944,7 @@ export default function Dashboard() {
                 </span>
               </div>
               <button
-                onClick={handleTogglePlan}
+                onClick={handleUpgradeToPro}
                 disabled={isSwitchingPlan}
                 className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-colors shadow-sm"
               >
