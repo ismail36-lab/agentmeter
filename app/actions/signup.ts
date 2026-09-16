@@ -69,7 +69,7 @@ export async function signupUserAction(input: SignupActionInput): Promise<Signup
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const userPlan = plan || "free";
+    const userPlan = "free";
 
     // 2. Supabase User Registration
     const supabaseAdmin = getSupabaseAdminClient();
@@ -77,7 +77,7 @@ export async function signupUserAction(input: SignupActionInput): Promise<Signup
       email: cleanEmail,
       password,
       options: {
-        data: { plan: userPlan },
+        data: { plan: "free" },
       },
     });
 

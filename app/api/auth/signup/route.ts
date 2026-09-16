@@ -82,7 +82,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<SignupRespons
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const userPlan = plan || "free";
+    const userPlan = "free";
 
     // 2. Supabase User Registration
     const supabaseAdmin = getSupabaseAdminClient();
@@ -90,7 +90,7 @@ export async function POST(req: NextRequest): Promise<NextResponse<SignupRespons
       email: cleanEmail,
       password,
       options: {
-        data: { plan: userPlan },
+        data: { plan: "free" },
       },
     });
 
