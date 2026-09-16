@@ -216,7 +216,6 @@ export default function Dashboard() {
   });
   const [isSwitchingPlan, setIsSwitchingPlan] = useState(false);
   const [isLoadingPortal, setIsLoadingPortal] = useState(false);
-  const [showCheckoutSuccessNotice, setShowCheckoutSuccessNotice] = useState(false);
 
   // Fetch Current Plan & Tier Usage
   const fetchPlanDetails = async () => {
@@ -462,10 +461,6 @@ export default function Dashboard() {
         fetchMetrics();
         fetchLogs(user.id);
         fetchPlanDetails();
-
-        if (typeof window !== "undefined" && window.location.search.includes("checkout=success")) {
-          setShowCheckoutSuccessNotice(true);
-        }
       } catch (err) {
         console.warn("Dashboard session initialization error:", err);
         await supabase.auth.signOut().catch(() => {});
@@ -824,24 +819,6 @@ export default function Dashboard() {
 
       {/* ── Main ───────────────────────────────────────────────── */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6 overflow-x-hidden">
-
-        {/* ── Checkout Success Notice ────────────────────────── */}
-        {showCheckoutSuccessNotice && (
-          <div className="flex items-center justify-between p-4 rounded-xl bg-indigo-950/70 border border-indigo-500/40 text-indigo-200 text-xs shadow-sm">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-indigo-400 shrink-0" />
-              <span>
-                Checkout completed successfully! Your subscription details will be updated automatically upon payment confirmation.
-              </span>
-            </div>
-            <button
-              onClick={() => setShowCheckoutSuccessNotice(false)}
-              className="text-indigo-400 hover:text-indigo-200 ml-2 font-mono text-xs"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
 
         {/* ── Header Banner ──────────────────────────────────── */}
         <div className="bento-card p-6 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between border border-zinc-800/80 bg-zinc-900/90">
