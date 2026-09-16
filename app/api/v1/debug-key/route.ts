@@ -10,6 +10,14 @@ export const dynamic = "force-dynamic";
  * Gated behind CRON_SECRET to prevent unauthorized access in production.
  */
 export async function GET(req: NextRequest) {
+  // ── Production guard: endpoint must never be reachable in production ─────
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json(
+      { error: "Endpoint disabled in production environment" },
+      { status: 404 }
+    );
+  }
+
   // ── Auth gate: require CRON_SECRET ──────────────────────────────────────
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret) {
