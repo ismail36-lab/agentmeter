@@ -217,11 +217,26 @@ export default function Dashboard() {
   const [isSwitchingPlan, setIsSwitchingPlan] = useState(false);
   const [isLoadingPortal, setIsLoadingPortal] = useState(false);
 
-  // Fetch Current Plan & Tier Usage
+  // Fetch Current Plan & Tier Usage from public.profiles table
   const fetchPlanDetails = async () => {
     try {
       const sessionRes = await supabase.auth.getSession();
+      const user = sessionRes.data.session?.user;
       const token = sessionRes.data.session?.access_token;
+
+      let profilePlan: string | null = null;
+      if (user?.id) {
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("plan")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (profile?.plan) {
+          profilePlan = String(profile.plan).toLowerCase();
+        }
+      }
+
       const headers: Record<string, string> = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -229,7 +244,23 @@ export default function Dashboard() {
       if (res.ok) {
         const data = await res.json();
         if (data.plan) {
-          setPlanDetails(data);
+          const resolvedPlan = profilePlan || data.plan || "free";
+          const limit = resolvedPlan === "pro" ? 500000 : 5000;
+          const tierName = resolvedPlan === "pro" ? "Pro Tier" : "Free Sandbox";
+          const limitLabel = resolvedPlan === "pro" ? "500,000 logs/mo" : "5,000 logs/mo";
+          const usage = data.usage ?? 0;
+          const percentage = Math.min(100, Number(((usage / limit) * 100).toFixed(1)));
+          const remaining = Math.max(0, limit - usage);
+
+          setPlanDetails({
+            plan: resolvedPlan,
+            tierName,
+            limit,
+            limitLabel,
+            usage,
+            percentage,
+            remaining,
+          });
         }
       }
     } catch (err) {
