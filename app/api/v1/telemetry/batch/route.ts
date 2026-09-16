@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { dispatchWebhookAlert } from "@/lib/webhooks";
 import { getCacheReadMultiplier } from "@/lib/pricing";
 import crypto from "crypto";

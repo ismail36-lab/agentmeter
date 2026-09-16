@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
 import { render } from "react-email";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { StaleModelAlertEmail } from "@/emails/StaleModelAlertEmail";
 
 export const dynamic = "force-dynamic";

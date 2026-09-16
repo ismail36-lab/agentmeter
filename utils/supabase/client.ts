@@ -1,6 +1,6 @@
 import { createBrowserClient as createSsrBrowserClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { syncSessionCookie } from "@/lib/supabase";
+import { syncSessionCookie } from "@/lib/supabase/client";
 
 declare global {
   // eslint-disable-next-line no-var

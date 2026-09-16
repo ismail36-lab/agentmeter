@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { dispatchWebhookAlert } from "@/lib/webhooks";
 import { verifyApiKey } from "@/lib/auth/meterix";
 import { createClient } from "@/utils/supabase/server";

@@ -2,7 +2,7 @@
 
 import { Resend } from "resend";
 import { render } from "react-email";
-import { getSupabaseAdminClient } from "@/lib/supabase";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { WelcomeEmail } from "@/emails/WelcomeEmail";
 
 export interface SignupActionInput {

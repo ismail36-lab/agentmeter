@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Resend } from "resend";
 import { render } from "react-email";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { createClient } from "@/utils/supabase/server";
 import { authorizeRole, Role } from "@/lib/rbac";
 import { TeamInviteEmail } from "@/emails/TeamInviteEmail";

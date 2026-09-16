@@ -1,6 +1,6 @@
 import { Resend } from "resend";
 import { render } from "react-email";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 import { AnomalyAlertEmail } from "@/emails/AnomalyAlertEmail";
 
 export interface SendAnomalyAlertInput {

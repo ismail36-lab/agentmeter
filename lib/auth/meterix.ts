@@ -1,5 +1,5 @@
 import crypto from "crypto";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export interface AuthenticatedApiKey {
   id: string;

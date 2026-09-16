@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getUserFromRequest, getSupabaseAdminClient } from "@/lib/supabase";
+import { getUserFromRequest, getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 // Lemon Squeezy Customer Portal
 // Fetches the customer's portal URL from Lemon Squeezy using their customer ID stored in profiles.
