@@ -17,12 +17,24 @@ export function LoginPageContent({ initialMode = "login" }: { initialMode?: Auth
 
   const hasRedirectedRef = useRef(false);
 
-  // Helper to get destination URL from query params
+  // Helper to get destination URL from query params.
+  // Strict safe-relative-path validation to prevent open-redirect attacks:
+  //   ✅ Must start with a single "/"
+  //   ❌ Must NOT start with "//" (blocks protocol-relative URLs like //evil.com)
+  //   ❌ Must NOT start with "/\" or "\" (blocks backslash bypass tricks like /\evil.com)
   const getNextDestination = () => {
     if (typeof window === "undefined") return "/dashboard";
     const params = new URLSearchParams(window.location.search);
     const next = params.get("next");
-    return next && next.startsWith("/") ? next : "/dashboard";
+
+    const isSafeRelativePath =
+      typeof next === "string" &&
+      next.startsWith("/") &&       // must begin with a single slash
+      !next.startsWith("//") &&     // block protocol-relative URLs (//evil.com)
+      !next.startsWith("/\\") &&    // block /\evil.com backslash bypass
+      !next.startsWith("\\");       // block \evil.com backslash bypass
+
+    return isSafeRelativePath ? next : "/dashboard";
   };
 
   // If already logged in, redirect to destination/dashboard ONCE
