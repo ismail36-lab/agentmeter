@@ -79,7 +79,14 @@ export async function POST(req: NextRequest): Promise<NextResponse<InviteRespons
     }
 
     const { email, role, project_id, projectId } = body;
-    const targetProjectId = project_id || projectId || null;
+    const targetProjectId = (project_id || projectId || "").trim();
+
+    if (!targetProjectId) {
+      return NextResponse.json(
+        { success: false, error: "project_id is required for team invites" },
+        { status: 400, headers: getCorsHeaders() }
+      );
+    }
 
     if (!email || typeof email !== "string" || !email.trim()) {
       return NextResponse.json(
@@ -102,19 +109,17 @@ export async function POST(req: NextRequest): Promise<NextResponse<InviteRespons
     const validRoles: Role[] = ["owner", "admin", "member", "viewer"];
     const targetRole: Role = role && validRoles.includes(role) ? role : "member";
 
-    // 3. Authorization check if targetProjectId is provided
-    if (targetProjectId) {
-      const authResult = await authorizeRole(targetProjectId, "admin");
-      if (!authResult.authorized) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Forbidden",
-            details: authResult.reason || "Only admins and owners can issue team invitations",
-          },
-          { status: 403, headers: getCorsHeaders() }
-        );
-      }
+    // 3. Authorization check (ALWAYS executed)
+    const authResult = await authorizeRole(targetProjectId, "admin");
+    if (!authResult.authorized) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Forbidden",
+          details: authResult.reason || "Only admins and owners can issue team invitations",
+        },
+        { status: 403, headers: getCorsHeaders() }
+      );
     }
 
     // 4. Generate unique invitation token & expiration
