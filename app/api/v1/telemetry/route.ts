@@ -536,6 +536,8 @@ export async function POST(req: NextRequest) {
       latency_ms: Number(body.latency_ms || 0),
       status_code: Number(body.status_code || 200),
       is_estimated: Boolean(body.is_estimated ?? false),
+      ...(sessionIdTag && { session_id: sessionIdTag }),
+      ...(agentTag && { agent_name: agentTag }),
     };
 
     // 4c. Anomaly & Error Monitoring Check: cost spike or error rate spike

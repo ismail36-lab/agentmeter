@@ -34,42 +34,49 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // 1. Primary lookup: Query Postgres view `session_cost_rollup` scoped strictly to user.id
+    // 1. Primary lookup: Query Postgres view/table `session_cost_rollup` strictly scoped to user.id
     const { data: viewRows, error: viewError } = await supabaseAdmin
       .from("session_cost_rollup")
       .select("*")
       .eq("user_id", user.id);
 
     if (!viewError && viewRows && viewRows.length > 0) {
-      const userViewRows = viewRows.filter((row: any) => row.user_id === user.id);
-      const formattedFromView: SessionRollupItem[] = userViewRows.map((row: any) => {
-        const models = Array.isArray(row.models_used)
-          ? row.models_used
-          : typeof row.models_used === "string"
-          ? row.models_used.split(",").map((m: string) => m.trim())
-          : [row.model || "gpt-4o"];
-
-        const startTime = new Date(row.start_time || row.first_call || row.created_at || Date.now());
-        const endTime = new Date(row.end_time || row.last_call || row.created_at || Date.now());
-        let durationSec = Number(row.duration_seconds ?? row.duration ?? 0);
-
-        if (!durationSec && startTime && endTime) {
-          durationSec = Math.max(0, Number(((endTime.getTime() - startTime.getTime()) / 1000).toFixed(1)));
-        }
-
-        return {
-          session_id: String(row.session_id),
-          agent_name: String(row.agent_name || row.agent || "AgentTask"),
-          total_cost: Number(Number(row.total_cost ?? row.total_cost_usd ?? row.cost ?? 0).toFixed(6)),
-          call_count: Number(row.call_count ?? row.total_calls ?? row.calls ?? 1),
-          models_used: Array.from(new Set(models.filter(Boolean))),
-          start_time: startTime.toISOString(),
-          end_time: endTime.toISOString(),
-          duration_seconds: durationSec,
-        };
+      const userViewRows = viewRows.filter((row: any) => {
+        if (row.user_id !== user.id) return false;
+        const sid = String(row.session_id || "").trim();
+        return sid.length > 0 && sid !== "null" && sid !== "undefined";
       });
 
-      return NextResponse.json({ success: true, sessions: formattedFromView }, { headers: NO_CACHE_HEADERS });
+      if (userViewRows.length > 0) {
+        const formattedFromView: SessionRollupItem[] = userViewRows.map((row: any) => {
+          const rawModels = Array.isArray(row.models_used)
+            ? row.models_used
+            : typeof row.models_used === "string"
+            ? row.models_used.split(",").map((m: string) => m.trim())
+            : [row.model || "gpt-4o"];
+
+          const startTime = new Date(row.start_time || row.first_call || row.created_at || Date.now());
+          const endTime = new Date(row.end_time || row.last_call || row.created_at || Date.now());
+          let durationSec = Number(row.duration_seconds ?? row.duration ?? 0);
+
+          if (!durationSec && startTime && endTime) {
+            durationSec = Math.max(0, Number(((endTime.getTime() - startTime.getTime()) / 1000).toFixed(1)));
+          }
+
+          return {
+            session_id: String(row.session_id).trim(),
+            agent_name: String(row.agent_name || row.agent || "AgentTask").trim(),
+            total_cost: Number(Number(row.total_cost ?? row.total_cost_usd ?? row.cost ?? 0).toFixed(6)),
+            call_count: Number(row.call_count ?? row.total_calls ?? row.calls ?? 1),
+            models_used: Array.from(new Set(rawModels.filter(Boolean))),
+            start_time: startTime.toISOString(),
+            end_time: endTime.toISOString(),
+            duration_seconds: durationSec,
+          };
+        });
+
+        return NextResponse.json({ success: true, sessions: formattedFromView }, { headers: NO_CACHE_HEADERS });
+      }
     }
 
     // 2. Secondary fallback: Query usage_logs strictly scoped to user.id
@@ -80,10 +87,23 @@ export async function GET(req: NextRequest) {
       .order("created_at", { ascending: true });
 
     if (logsError) {
-      console.warn("session-rollups fallback logs query notice:", logsError.message);
+      console.warn("session-rollups usage_logs query notice:", logsError.message);
     }
 
-    const allLogs = logs || [];
+    let allLogs = logs || [];
+
+    // Fallback check to telemetry_logs strictly scoped to user.id if usage_logs is empty
+    if (allLogs.length === 0) {
+      const { data: tLogs } = await supabaseAdmin
+        .from("telemetry_logs")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: true });
+      if (tLogs && tLogs.length > 0) {
+        allLogs = tLogs;
+      }
+    }
+
     const sessionMap: Record<
       string,
       {
@@ -99,12 +119,34 @@ export async function GET(req: NextRequest) {
     > = {};
 
     allLogs.forEach((log) => {
-      const sessId = String(log.session_id || log.metadata?.session_id || "").trim();
-      if (!sessId) return;
+      const rawPayload = log.raw_payload || log.metadata || {};
+      const sessId = String(
+        log.session_id ||
+        log.sessionId ||
+        log.metadata?.session_id ||
+        log.metadata?.sessionId ||
+        rawPayload.session_id ||
+        rawPayload.sessionId ||
+        rawPayload.metadata?.session_id ||
+        rawPayload.metadata?.sessionId ||
+        ""
+      ).trim();
 
-      const cost = Number(log.total_cost_usd ?? log.cost ?? 0);
-      const model = String(log.model || "gpt-4o");
-      const agent = String(log.agent_name || log.metadata?.agent_name || "AgentTask");
+      if (!sessId || sessId === "null" || sessId === "undefined" || sessId === "none") return;
+
+      const cost = Number(log.total_cost_usd ?? log.cost_usd ?? log.cost ?? log.calculated_cost ?? 0);
+      const model = String(log.model || "gpt-4o").trim();
+      const agent = String(
+        log.agent_name ||
+        log.agent ||
+        log.metadata?.agent_name ||
+        log.metadata?.agent ||
+        rawPayload.agent_name ||
+        rawPayload.agent ||
+        rawPayload.metadata?.agent_name ||
+        "AgentTask"
+      ).trim();
+
       const timestampStr = log.created_at || log.timestamp || new Date().toISOString();
       const timeMs = new Date(timestampStr).getTime();
       const latencyMs = Number(log.latency_ms || log.latency || 100);
@@ -130,7 +172,7 @@ export async function GET(req: NextRequest) {
 
       if (timeMs < sess.first_time) sess.first_time = timeMs;
       if (timeMs > sess.last_time) sess.last_time = timeMs;
-      if (agent && agent !== "default-agent" && sess.agent_name === "default-agent") {
+      if (agent && agent !== "default-agent" && agent !== "AgentTask" && (sess.agent_name === "default-agent" || sess.agent_name === "AgentTask")) {
         sess.agent_name = agent;
       }
     });
@@ -147,7 +189,7 @@ export async function GET(req: NextRequest) {
           agent_name: s.agent_name,
           total_cost: Number(s.total_cost.toFixed(6)),
           call_count: s.call_count,
-          models_used: Array.from(s.models),
+          models_used: Array.from(s.models).filter(Boolean),
           start_time: new Date(s.first_time).toISOString(),
           end_time: new Date(s.last_time).toISOString(),
           duration_seconds: durationSec,
@@ -164,3 +206,4 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
