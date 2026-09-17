@@ -7,6 +7,7 @@ import { getCacheReadMultiplier } from "@/lib/pricing";
 import crypto from "crypto";
 import { sendBudgetAlert } from "@/lib/budget-alerts";
 import { sendAnomalyAlert } from "@/lib/anomaly-alerts";
+import { checkRateLimit } from "@/lib/rate-limiter";
 
 export const dynamic = "force-dynamic";
 
@@ -164,6 +165,29 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         console.warn("Could not fetch plan for quota check:", err);
       }
+    }
+
+    // ── Rate Limit Enforcement (per-key, per-minute) ─────────────────────
+    const rateLimitResult = checkRateLimit(apiKeyRecord.id, userPlan);
+    if (!rateLimitResult.allowed) {
+      const retryAfterSec = Math.ceil(rateLimitResult.retryAfterMs / 1000);
+      console.warn(
+        `[telemetry] Rate limit exceeded for key=${apiKeyRecord.id} plan=${userPlan} ` +
+        `count=${rateLimitResult.current}/${rateLimitResult.limit}`
+      );
+      return NextResponse.json(
+        { error: "Rate limit exceeded. Please upgrade your plan or try again later." },
+        {
+          status: 429,
+          headers: {
+            ...getCorsHeaders(),
+            "Retry-After": String(retryAfterSec),
+            "X-RateLimit-Limit": String(rateLimitResult.limit),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": String(Math.ceil((Date.now() + rateLimitResult.retryAfterMs) / 1000)),
+          },
+        }
+      );
     }
 
     // Query usage_logs table to count total logs for the current org/user

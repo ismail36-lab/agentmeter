@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { checkRateLimit } from "@/lib/rate-limiter";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -117,6 +118,33 @@ export async function POST(req: NextRequest) {
     }
 
     const monthlyLogLimit = PLAN_LIMITS[planType] ?? PLAN_LIMITS.free;
+
+    // ── Rate Limit Enforcement (per-key, per-minute) ─────────────────────
+    if (userId) {
+      // Resolve the canonical key ID for rate-limit bucketing
+      const keyBucketId = `ingest:${userId}`;
+      const rateLimitResult = checkRateLimit(keyBucketId, planType);
+      if (!rateLimitResult.allowed) {
+        const retryAfterSec = Math.ceil(rateLimitResult.retryAfterMs / 1000);
+        console.warn(
+          `[ingest] Rate limit exceeded for user=${userId} plan=${planType} ` +
+          `count=${rateLimitResult.current}/${rateLimitResult.limit}`
+        );
+        return NextResponse.json(
+          { error: "Rate limit exceeded. Please upgrade your plan or try again later." },
+          {
+            status: 429,
+            headers: {
+              ...getCorsHeaders(),
+              "Retry-After": String(retryAfterSec),
+              "X-RateLimit-Limit": String(rateLimitResult.limit),
+              "X-RateLimit-Remaining": "0",
+              "X-RateLimit-Reset": String(Math.ceil((Date.now() + rateLimitResult.retryAfterMs) / 1000)),
+            },
+          }
+        );
+      }
+    }
 
     // ── 4. Monthly quota check ────────────────────────────────────────────
     const now = new Date();
