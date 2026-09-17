@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { checkRateLimit } from "@/lib/rate-limiter";
+import { checkRateLimit, checkRateLimitAsync } from "@/lib/rate-limiter";
 import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
@@ -123,7 +123,7 @@ export async function POST(req: NextRequest) {
     if (userId) {
       // Resolve the canonical key ID for rate-limit bucketing
       const keyBucketId = `ingest:${userId}`;
-      const rateLimitResult = checkRateLimit(keyBucketId, planType);
+      const rateLimitResult = await checkRateLimitAsync(keyBucketId, planType);
       if (!rateLimitResult.allowed) {
         const retryAfterSec = Math.ceil(rateLimitResult.retryAfterMs / 1000);
         console.warn(
@@ -131,7 +131,7 @@ export async function POST(req: NextRequest) {
           `count=${rateLimitResult.current}/${rateLimitResult.limit}`
         );
         return NextResponse.json(
-          { error: "Rate limit exceeded. Please upgrade your plan or try again later." },
+          { error: "Rate limit exceeded" },
           {
             status: 429,
             headers: {

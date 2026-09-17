@@ -7,7 +7,7 @@ import { getCacheReadMultiplier } from "@/lib/pricing";
 import crypto from "crypto";
 import { sendBudgetAlert } from "@/lib/budget-alerts";
 import { sendAnomalyAlert } from "@/lib/anomaly-alerts";
-import { checkRateLimit } from "@/lib/rate-limiter";
+import { checkRateLimit, checkRateLimitAsync } from "@/lib/rate-limiter";
 
 export const dynamic = "force-dynamic";
 
@@ -168,15 +168,16 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Rate Limit Enforcement (per-key, per-minute) ─────────────────────
-    const rateLimitResult = checkRateLimit(apiKeyRecord.id, userPlan);
+    const rateLimitKey = apiKeyRecord?.id || apiKeyRecord?.key || apiKey || "anon";
+    const rateLimitResult = await checkRateLimitAsync(rateLimitKey, userPlan);
     if (!rateLimitResult.allowed) {
       const retryAfterSec = Math.ceil(rateLimitResult.retryAfterMs / 1000);
       console.warn(
-        `[telemetry] Rate limit exceeded for key=${apiKeyRecord.id} plan=${userPlan} ` +
+        `[telemetry] Rate limit exceeded for key=${rateLimitKey} plan=${userPlan} ` +
         `count=${rateLimitResult.current}/${rateLimitResult.limit}`
       );
       return NextResponse.json(
-        { error: "Rate limit exceeded. Please upgrade your plan or try again later." },
+        { error: "Rate limit exceeded" },
         {
           status: 429,
           headers: {

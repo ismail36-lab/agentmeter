@@ -1,23 +1,5 @@
-/**
- * In-process sliding-window rate limiter.
- *
- * Why in-process (not Redis)?
- * - No Redis/Upstash is provisioned in this project.
- * - Vercel serverless functions keep warm instances alive across requests,
- *   so this catches rapid bursts from the same caller on the same instance.
- * - For true distributed rate-limiting across all instances, swap the Map
- *   for an Upstash Redis INCR+EXPIRE call — the interface is identical.
- *
- * Algorithm: fixed 60-second window per key.
- *   - On each request: if the stored window has expired, reset counter to 1.
- *   - Otherwise increment the counter.
- *   - If counter > limit → reject with 429.
- *
- * Plan limits (requests per minute):
- *   free:       60 req/min
- *   pro:     1,000 req/min
- *   enterprise: unlimited (no check)
- */
+import { Redis } from "@upstash/redis";
+import { Ratelimit } from "@upstash/ratelimit";
 
 const WINDOW_MS = 60_000; // 1 minute
 
@@ -27,14 +9,6 @@ export const RATE_LIMITS: Record<string, number> = {
   pro: 1_000,
   enterprise: Infinity,
 };
-
-interface WindowEntry {
-  count: number;
-  windowStart: number; // epoch ms
-}
-
-// Module-level Map persists across requests within the same warm instance
-const rateLimitStore = new Map<string, WindowEntry>();
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -46,16 +20,79 @@ export interface RateLimitResult {
   retryAfterMs: number;
 }
 
+// ── Upstash Redis Client & Ratelimiters ──────────────────────────────────────
+const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+
+const redis = (redisUrl && redisToken)
+  ? new Redis({ url: redisUrl, token: redisToken })
+  : null;
+
+const ratelimiters = new Map<number, Ratelimit>();
+
+function getUpstashRatelimiter(limit: number): Ratelimit | null {
+  if (!redis) return null;
+  if (!ratelimiters.has(limit)) {
+    ratelimiters.set(
+      limit,
+      new Ratelimit({
+        redis,
+        limiter: Ratelimit.slidingWindow(limit, "60 s"),
+        analytics: true,
+        prefix: "@upstash/ratelimit",
+      })
+    );
+  }
+  return ratelimiters.get(limit)!;
+}
+
+// ── In-Memory Fallback Store ──────────────────────────────────────────────────
+interface WindowEntry {
+  count: number;
+  windowStart: number; // epoch ms
+}
+
+const rateLimitStore = new Map<string, WindowEntry>();
+
 /**
- * Check and record a request for the given key + plan.
+ * Check and record a request asynchronously using Upstash Redis if configured,
+ * falling back to the in-memory sliding window limiter.
  *
- * @param keyId   - The api_keys.id value (stable identifier, never the raw secret)
- * @param plan    - The user's plan string: "free" | "pro" | "enterprise"
+ * @param keyId   - The identifier (API key ID, API key string, or IP address)
+ * @param plan    - The plan string: "free" | "pro" | "enterprise"
  */
-export function checkRateLimit(keyId: string, plan: string): RateLimitResult {
+export async function checkRateLimitAsync(keyId: string, plan: string = "free"): Promise<RateLimitResult> {
   const limit = RATE_LIMITS[plan] ?? RATE_LIMITS.free;
 
-  // Unlimited plan — skip tracking entirely
+  if (!isFinite(limit)) {
+    return { allowed: true, current: 0, limit: Infinity, retryAfterMs: 0 };
+  }
+
+  const ratelimiter = getUpstashRatelimiter(limit);
+  if (ratelimiter) {
+    try {
+      const res = await ratelimiter.limit(keyId);
+      const retryAfterMs = Math.max(0, res.reset - Date.now());
+      return {
+        allowed: res.success,
+        current: limit - res.remaining,
+        limit,
+        retryAfterMs,
+      };
+    } catch (err) {
+      console.warn("[rate-limiter] Upstash Redis lookup failed, falling back to memory:", err);
+    }
+  }
+
+  return checkRateLimit(keyId, plan);
+}
+
+/**
+ * Synchronous check using in-process sliding window.
+ */
+export function checkRateLimit(keyId: string, plan: string = "free"): RateLimitResult {
+  const limit = RATE_LIMITS[plan] ?? RATE_LIMITS.free;
+
   if (!isFinite(limit)) {
     return { allowed: true, current: 0, limit: Infinity, retryAfterMs: 0 };
   }
@@ -64,12 +101,10 @@ export function checkRateLimit(keyId: string, plan: string): RateLimitResult {
   const entry = rateLimitStore.get(keyId);
 
   if (!entry || now - entry.windowStart >= WINDOW_MS) {
-    // Start a fresh window
     rateLimitStore.set(keyId, { count: 1, windowStart: now });
     return { allowed: true, current: 1, limit, retryAfterMs: 0 };
   }
 
-  // Still inside the current window
   entry.count += 1;
   const retryAfterMs = WINDOW_MS - (now - entry.windowStart);
 
@@ -81,8 +116,7 @@ export function checkRateLimit(keyId: string, plan: string): RateLimitResult {
 }
 
 /**
- * Periodically prune stale entries to prevent unbounded Map growth.
- * Call this from a cron route or let the GC handle it on instance recycle.
+ * Periodically prune stale in-memory entries to prevent unbounded Map growth.
  */
 export function pruneRateLimitStore(): number {
   const now = Date.now();
@@ -95,3 +129,4 @@ export function pruneRateLimitStore(): number {
   }
   return pruned;
 }
+
