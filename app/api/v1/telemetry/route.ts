@@ -8,17 +8,27 @@ import crypto from "crypto";
 import { sendBudgetAlert } from "@/lib/budget-alerts";
 import { sendAnomalyAlert } from "@/lib/anomaly-alerts";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { Redis } from "@upstash/redis";
+import { Ratelimit } from "@upstash/ratelimit";
 
 export const dynamic = "force-dynamic";
 
-// Plan -> requests/minute. Keep in sync with lib/rate-limiter.ts RATE_LIMITS
-// and the pricing page. "free" is also the safe default for any caller
-// whose plan cannot yet be resolved (e.g. auth failed).
-const PLAN_RATE_LIMITS: Record<string, number> = {
-  free: 60,
-  pro: 1_000,
-  enterprise: 100_000, // effectively unmetered at this layer; edge cap in middleware.ts still applies
-};
+// Initialize Upstash Redis and Ratelimit from process.env
+const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
+const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+const redis = (redisUrl && redisToken)
+  ? new Redis({ url: redisUrl, token: redisToken })
+  : null;
+
+const ratelimit = redis
+  ? new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(60, "1 m"),
+      analytics: true,
+      prefix: "rate_limit:telemetry",
+    })
+  : null;
 
 async function getOwnerEmail(userId: string | null): Promise<string | null> {
   if (!userId) return null;
@@ -75,18 +85,29 @@ export async function POST(req: NextRequest) {
 
   const requestedKeyIdHeader = req.headers.get("x-key-id");
 
-  // ── 2. Resolve identity + plan BEFORE any pricing/budget/DB-insert work ────
-  //
-  // NOTE ON ORDERING: Free (60/min) vs Pro (1,000/min) cannot be told apart
-  // without knowing *who* is calling, which requires one indexed lookup
-  // (verifyApiKey -> api_keys.key_hash). We therefore resolve identity here,
-  // immediately, and BEFORE any of the heavier work below (quota counting,
-  // model_pricing lookups, budget-cap checks, the usage_logs insert). This
-  // preserves the original intent — reject abusive traffic before doing
-  // expensive work — while still applying the *correct* per-plan ceiling.
-  // A flat, pre-auth limit (as in middleware.ts's edge cap) can only ever
-  // enforce one blanket number for every caller; it cannot enforce "60 for
-  // Free, 1,000 for Pro" by definition.
+  // Consistent identifier for rate limiting: API key, Bearer token, or fallback IP
+  const identifier = apiKey || authHeader || clientIp;
+
+  // ── 2. Strictly enforce Upstash Redis rate limit (60 req / 1 m) upfront ────
+  if (ratelimit) {
+    const { success } = await ratelimit.limit(identifier);
+    if (!success) {
+      return NextResponse.json(
+        { error: "Too Many Requests" },
+        { status: 429, headers: getCorsHeaders() }
+      );
+    }
+  } else {
+    const rateLimitResult = await checkRateLimit(identifier, 60);
+    if (!rateLimitResult.allowed) {
+      return NextResponse.json(
+        { error: "Too Many Requests" },
+        { status: 429, headers: getCorsHeaders() }
+      );
+    }
+  }
+
+  // ── 3. Resolve identity + plan AFTER rate-limit check ──────────────────────
   let userId: string | null = null;
   let apiKeyRecord: any = null;
 
@@ -165,8 +186,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Resolve plan from public.profiles (single source of truth) — done ONCE
-  // here and reused below for the quota check, instead of querying twice.
+  // Resolve plan from public.profiles (single source of truth)
   let userPlan = "free";
   if (userId) {
     try {
@@ -180,36 +200,8 @@ export async function POST(req: NextRequest) {
         userPlan = String(profile.plan).toLowerCase();
       }
     } catch (err) {
-      console.warn("[telemetry-auth] Could not fetch plan, defaulting to free for rate-limit + quota:", err);
+      console.warn("[telemetry-auth] Could not fetch plan:", err);
     }
-  }
-
-  // ── 3. Enforce plan-aware rate limit — still before ANY telemetry business
-  //       logic (quota count, pricing lookup, budget check, DB insert). ─────
-  const rateLimitScope = apiKeyRecord?.id
-    ? `key:${apiKeyRecord.id}`
-    : userId
-      ? `user:${userId}`
-      : `ip:${clientIp}`;
-
-  const planLimit = PLAN_RATE_LIMITS[userPlan] ?? PLAN_RATE_LIMITS.free;
-  const rateLimitResult = await checkRateLimit(rateLimitScope, planLimit);
-  console.log("[telemetry] Rate limit check:", { scope: rateLimitScope, plan: userPlan, ...rateLimitResult });
-
-  if (!rateLimitResult.allowed) {
-    return NextResponse.json(
-      {
-        error: "Too Many Requests",
-        message: `Rate limit exceeded. Maximum ${planLimit} requests per minute allowed on the ${userPlan} tier.`,
-      },
-      {
-        status: 429,
-        headers: {
-          ...getCorsHeaders(),
-          "Retry-After": String(Math.ceil(rateLimitResult.retryAfterMs / 1000)),
-        },
-      }
-    );
   }
 
   // ── 4. Now that traffic has passed the rate limiter, require valid auth ───
