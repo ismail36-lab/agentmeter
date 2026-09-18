@@ -42,10 +42,25 @@ export async function OPTIONS() {
   return NextResponse.json({}, { headers: getCorsHeaders() });
 }
 
+const requestTracker = new Map<string, number[]>();
+
 export async function POST(req: NextRequest) {
+  const authHeader = req.headers.get("authorization") || "anonymous";
+  const now = Date.now();
+  const windowMs = 60 * 1000; // 1 minute
+  const limit = 60;
+
+  const timestamps = (requestTracker.get(authHeader) || []).filter(t => now - t < windowMs);
+
+  if (timestamps.length >= limit) {
+    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+  }
+
+  timestamps.push(now);
+  requestTracker.set(authHeader, timestamps);
+
   try {
     // 1. Extract API Key and headers
-    const authHeader = req.headers.get("authorization");
     const xApiKey = req.headers.get("x-api-key");
 
     let apiKey = "";
@@ -53,7 +68,7 @@ export async function POST(req: NextRequest) {
       apiKey = xApiKey.trim();
     } else if (authHeader && authHeader.startsWith("Bearer ")) {
       apiKey = authHeader.substring(7).trim();
-    } else if (authHeader) {
+    } else if (authHeader && authHeader !== "anonymous") {
       apiKey = authHeader.trim();
     }
 
@@ -152,31 +167,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: "Secret key missing or invalid, and no active user session found" },
         { status: 401, headers: getCorsHeaders() }
-      );
-    }
-
-    // ── Fail-Closed Rate Limiting Enforcement (Right after successful [telemetry-auth]) ──
-    const rateLimitKey = apiKeyRecord?.id || apiKeyRecord?.key || apiKey || userId || clientIp;
-    const rateLimitResult = await checkRateLimit(rateLimitKey);
-
-    if (!rateLimitResult.allowed) {
-      const retryAfterSec = Math.ceil(rateLimitResult.retryAfterMs / 1000);
-      console.warn(
-        `[telemetry] Rate limit exceeded for key=${rateLimitKey} ` +
-        `count=${rateLimitResult.current}/${rateLimitResult.limit}`
-      );
-      return NextResponse.json(
-        { error: "Rate limit exceeded" },
-        {
-          status: 429,
-          headers: {
-            ...getCorsHeaders(),
-            "Retry-After": String(retryAfterSec),
-            "X-RateLimit-Limit": String(rateLimitResult.limit),
-            "X-RateLimit-Remaining": "0",
-            "X-RateLimit-Reset": String(Math.ceil((Date.now() + rateLimitResult.retryAfterMs) / 1000)),
-          },
-        }
       );
     }
 
