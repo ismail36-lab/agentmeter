@@ -2,9 +2,11 @@ import { Redis } from "@upstash/redis";
 import { Ratelimit } from "@upstash/ratelimit";
 
 export interface RateLimitResult {
+  success: boolean;
+  limit: number;
+  remaining: number;
   allowed: boolean;
   current: number;
-  limit: number;
   retryAfterMs: number;
 }
 
@@ -24,9 +26,11 @@ export function checkInMemoryRateLimit(
 
     if (timestamps.length >= limit) {
       return {
+        success: false,
         allowed: false,
-        current: timestamps.length,
         limit,
+        remaining: 0,
+        current: timestamps.length,
         retryAfterMs: Math.max(0, (timestamps[0] || now) + windowMs - now),
       };
     }
@@ -34,19 +38,24 @@ export function checkInMemoryRateLimit(
     timestamps.push(now);
     memoryStore.set(identifier, timestamps);
 
+    const remaining = limit - timestamps.length;
     return {
+      success: true,
       allowed: true,
-      current: timestamps.length,
       limit,
+      remaining,
+      current: timestamps.length,
       retryAfterMs: 0,
     };
   } catch (err) {
     console.error("[rate-limit] In-memory rate limit error:", err);
     // DO NOT default to allowing the request -> FAIL CLOSED
     return {
+      success: false,
       allowed: false,
-      current: maxLimit,
       limit: maxLimit,
+      remaining: 0,
+      current: maxLimit,
       retryAfterMs: 60000,
     };
   }
@@ -57,7 +66,7 @@ function checkInMemoryLimit(identifier: string, maxLimit = 60): { success: boole
   return {
     success: res.allowed,
     limit: res.limit,
-    remaining: Math.max(0, res.limit - res.current),
+    remaining: res.remaining,
     reset: Date.now() + res.retryAfterMs,
   };
 }
@@ -79,13 +88,13 @@ function getUpstashLimiter(): Ratelimit | null {
       });
       upstashLimiter = new Ratelimit({
         redis: redisClient,
-        limiter: Ratelimit.slidingWindow(60, "1 m"),
+        limiter: Ratelimit.slidingWindow(60, "60 s"),
         analytics: true,
-        prefix: "@upstash/ratelimit",
+        prefix: "rate_limit",
       });
       return upstashLimiter;
     } catch (err) {
-      console.warn("[rate-limit] Failed to initialize Upstash Redis:", err);
+      console.error("[rate-limit] Failed to initialize Upstash Redis:", err);
       redisClient = null;
       upstashLimiter = null;
       return null;
@@ -107,7 +116,7 @@ export const ratelimit = {
           reset: res.reset,
         };
       } catch (err) {
-        console.warn("[rate-limit] Upstash Redis request failed, using strict memory fallback:", err);
+        console.error("[rate-limit] Upstash Redis request failed, using strict memory fallback:", err);
         return checkInMemoryLimit(identifier);
       }
     }
@@ -118,23 +127,27 @@ export const ratelimit = {
 
 export async function checkRateLimit(
   identifier: string,
-  customLimit?: number
+  customLimit: number = 60
 ): Promise<RateLimitResult> {
   const limiter = getUpstashLimiter();
   if (limiter) {
     try {
       const res = await limiter.limit(identifier);
       const limit = customLimit ?? res.limit ?? 60;
-      const current = (res.limit ?? 60) - (res.remaining ?? 0);
-      const allowed = res.success && (customLimit === undefined || current <= customLimit);
+      const remaining = Math.max(0, res.remaining ?? 0);
+      const success = res.success && remaining >= 0;
+      const current = (res.limit ?? 60) - remaining;
+
       return {
-        allowed,
-        current,
+        success,
+        allowed: success,
         limit,
+        remaining,
+        current,
         retryAfterMs: Math.max(0, (res.reset ?? Date.now() + 60000) - Date.now()),
       };
     } catch (err) {
-      console.warn("[rate-limit] Upstash Redis request failed, using strict memory fallback:", err);
+      console.error("[rate-limit] Upstash Redis rate limit check failed, using memory fallback:", err);
       return checkInMemoryRateLimit(identifier, customLimit);
     }
   }

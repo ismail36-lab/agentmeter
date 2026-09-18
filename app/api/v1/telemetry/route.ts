@@ -43,19 +43,14 @@ export async function OPTIONS() {
 }
 
 export async function POST(req: NextRequest) {
-  // Temporary hardcoded test check
-  if (req.headers.get("x-test-429") !== "disabled") {
-    return NextResponse.json({ error: "Testing 429" }, { status: 429 });
-  }
-
-  // 1. Extract API Key and headers early for rate limiting
-  const xApiKey = req.headers.get("x-api-key") || "";
-  const authHeader = req.headers.get("authorization") || "";
+  // ── 1. Extract Bearer token / API Key from request headers ─────────────────
+  const xApiKey = req.headers.get("x-api-key");
+  const authHeader = req.headers.get("authorization");
 
   let apiKey = "";
-  if (xApiKey.trim()) {
+  if (xApiKey && xApiKey.trim()) {
     apiKey = xApiKey.trim();
-  } else if (authHeader.startsWith("Bearer ")) {
+  } else if (authHeader && authHeader.startsWith("Bearer ")) {
     apiKey = authHeader.substring(7).trim();
   } else if (authHeader && authHeader !== "anonymous") {
     apiKey = authHeader.trim();
@@ -67,18 +62,22 @@ export async function POST(req: NextRequest) {
   const clientIp =
     req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     req.headers.get("x-real-ip") ||
-    (req as any).ip ||
     "127.0.0.1";
 
-  // Bucket identifier for rate limiting: use API key if present, otherwise client IP
-  const rateLimitKey = apiKey ? `telemetry:${apiKey}` : `telemetry:ip:${clientIp}`;
+  // SHA-256 hash API key for key formatting, or fallback to client IP
+  const keyHash = apiKey
+    ? crypto.createHash("sha256").update(apiKey).digest("hex")
+    : `ip:${clientIp}`;
 
-  // 2. Enforce Rate Limiting before any processing or saving telemetry data
-  const rateLimitResult = await checkRateLimit(rateLimitKey);
+  // ── 2. Enforce Strict Rate Limiting at VERY TOP of handler ─────────────────
+  const rateLimitResult = await checkRateLimit(keyHash);
   console.log("Rate limit check result:", rateLimitResult);
 
-  if (!rateLimitResult.allowed) {
-    return NextResponse.json({ error: "Too Many Requests" }, { status: 429, headers: getCorsHeaders() });
+  if (!rateLimitResult.success || rateLimitResult.remaining < 0 || (rateLimitResult.current ?? 0) > 60) {
+    return NextResponse.json(
+      { error: "Too Many Requests", message: "Rate limit exceeded. Try again in a minute." },
+      { status: 429, headers: getCorsHeaders() }
+    );
   }
 
   try {

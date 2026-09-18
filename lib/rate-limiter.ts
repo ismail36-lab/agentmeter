@@ -16,7 +16,7 @@ export async function checkRateLimitAsync(keyId: string, plan: string = "free"):
   const limit = RATE_LIMITS[plan] ?? RATE_LIMITS.free;
 
   if (!isFinite(limit)) {
-    return { allowed: true, current: 0, limit: Infinity, retryAfterMs: 0 };
+    return { success: true, allowed: true, current: 0, limit: Infinity, remaining: Infinity, retryAfterMs: 0 };
   }
 
   return checkRateLimitCore(keyId, limit);
@@ -29,7 +29,7 @@ export function checkRateLimit(keyId: string, plan: string = "free"): RateLimitR
   const limit = RATE_LIMITS[plan] ?? RATE_LIMITS.free;
 
   if (!isFinite(limit)) {
-    return { allowed: true, current: 0, limit: Infinity, retryAfterMs: 0 };
+    return { success: true, allowed: true, current: 0, limit: Infinity, remaining: Infinity, retryAfterMs: 0 };
   }
 
   return checkInMemoryRateLimit(keyId, limit);
