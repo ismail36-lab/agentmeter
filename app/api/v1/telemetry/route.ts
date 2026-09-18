@@ -42,46 +42,42 @@ export async function OPTIONS() {
   return NextResponse.json({}, { headers: getCorsHeaders() });
 }
 
-const requestTracker = new Map<string, number[]>();
-
 export async function POST(req: NextRequest) {
-  const authHeader = req.headers.get("authorization") || "anonymous";
-  const now = Date.now();
-  const windowMs = 60 * 1000; // 1 minute
-  const limit = 60;
+  // 1. Extract API Key and headers early for rate limiting
+  const xApiKey = req.headers.get("x-api-key");
+  const authHeader = req.headers.get("authorization");
 
-  const timestamps = (requestTracker.get(authHeader) || []).filter(t => now - t < windowMs);
-
-  if (timestamps.length >= limit) {
-    return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
+  let apiKey = "";
+  if (xApiKey && xApiKey.trim()) {
+    apiKey = xApiKey.trim();
+  } else if (authHeader && authHeader.startsWith("Bearer ")) {
+    apiKey = authHeader.substring(7).trim();
+  } else if (authHeader && authHeader !== "anonymous") {
+    apiKey = authHeader.trim();
   }
 
-  timestamps.push(now);
-  requestTracker.set(authHeader, timestamps);
+  // Strip any accidental wrapping quotes
+  apiKey = apiKey.replace(/^["']|["']$/g, "").trim();
+
+  const clientIp =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    (req as any).ip ||
+    "127.0.0.1";
+
+  // Bucket identifier for rate limiting: use API key if present, otherwise client IP
+  const rateLimitKey = apiKey ? `telemetry:${apiKey}` : `telemetry:ip:${clientIp}`;
+
+  // 2. Enforce Rate Limiting before any processing or saving telemetry data
+  const rateLimitResult = await checkRateLimit(rateLimitKey);
+  console.log("Rate limit check result:", rateLimitResult);
+
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json({ error: "Too Many Requests" }, { status: 429, headers: getCorsHeaders() });
+  }
 
   try {
-    // 1. Extract API Key and headers
-    const xApiKey = req.headers.get("x-api-key");
-
-    let apiKey = "";
-    if (xApiKey && xApiKey.trim()) {
-      apiKey = xApiKey.trim();
-    } else if (authHeader && authHeader.startsWith("Bearer ")) {
-      apiKey = authHeader.substring(7).trim();
-    } else if (authHeader && authHeader !== "anonymous") {
-      apiKey = authHeader.trim();
-    }
-
-    // Strip any accidental wrapping quotes
-    apiKey = apiKey.replace(/^["']|["']$/g, "").trim();
-
-    const clientIp =
-      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      req.headers.get("x-real-ip") ||
-      (req as any).ip ||
-      "127.0.0.1";
-
-    // 2. Parse JSON Body early
+    // 3. Parse JSON Body early
     const body = await req.json().catch(() => ({}));
     const requestedKeyId = body.key_id || body.keyId || req.headers.get("x-key-id");
 
