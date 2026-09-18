@@ -7,7 +7,7 @@ import { getCacheReadMultiplier } from "@/lib/pricing";
 import crypto from "crypto";
 import { sendBudgetAlert } from "@/lib/budget-alerts";
 import { sendAnomalyAlert } from "@/lib/anomaly-alerts";
-import { checkRateLimit, checkRateLimitAsync } from "@/lib/rate-limiter";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +44,7 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   try {
-    // 1. Extract API Key and headers
+    // ── 1. Rate Limiting Check AT THE VERY TOP of POST handler ──────────────
     const authHeader = req.headers.get("authorization");
     const xApiKey = req.headers.get("x-api-key");
 
@@ -59,6 +59,23 @@ export async function POST(req: NextRequest) {
 
     // Strip any accidental wrapping quotes
     apiKey = apiKey.replace(/^["']|["']$/g, "").trim();
+
+    const clientIp =
+      req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      req.headers.get("x-real-ip") ||
+      (req as any).ip ||
+      "127.0.0.1";
+
+    // Identify request by API key (Authorization header) or IP address
+    const rateLimitIdentifier = apiKey || clientIp;
+
+    const rateLimitResult = await checkRateLimit(rateLimitIdentifier);
+    if (!rateLimitResult.allowed) {
+      return NextResponse.json(
+        { error: "Rate limit exceeded" },
+        { status: 429, headers: getCorsHeaders() }
+      );
+    }
 
     // 2. Parse JSON Body early
     const body = await req.json().catch(() => ({}));
@@ -165,30 +182,6 @@ export async function POST(req: NextRequest) {
       } catch (err) {
         console.warn("Could not fetch plan for quota check:", err);
       }
-    }
-
-    // ── Rate Limit Enforcement (per-key, per-minute) ─────────────────────
-    const rateLimitKey = apiKeyRecord?.id || apiKeyRecord?.key || apiKey || "anon";
-    const rateLimitResult = await checkRateLimitAsync(rateLimitKey, userPlan);
-    if (!rateLimitResult.allowed) {
-      const retryAfterSec = Math.ceil(rateLimitResult.retryAfterMs / 1000);
-      console.warn(
-        `[telemetry] Rate limit exceeded for key=${rateLimitKey} plan=${userPlan} ` +
-        `count=${rateLimitResult.current}/${rateLimitResult.limit}`
-      );
-      return NextResponse.json(
-        { error: "Rate limit exceeded" },
-        {
-          status: 429,
-          headers: {
-            ...getCorsHeaders(),
-            "Retry-After": String(retryAfterSec),
-            "X-RateLimit-Limit": String(rateLimitResult.limit),
-            "X-RateLimit-Remaining": "0",
-            "X-RateLimit-Reset": String(Math.ceil((Date.now() + rateLimitResult.retryAfterMs) / 1000)),
-          },
-        }
-      );
     }
 
     // Query usage_logs table to count total logs for the current org/user
