@@ -43,14 +43,19 @@ export async function OPTIONS() {
 }
 
 export async function POST(req: NextRequest) {
+  // Temporary hardcoded test check
+  if (req.headers.get("x-test-429") !== "disabled") {
+    return NextResponse.json({ error: "Testing 429" }, { status: 429 });
+  }
+
   // 1. Extract API Key and headers early for rate limiting
-  const xApiKey = req.headers.get("x-api-key");
-  const authHeader = req.headers.get("authorization");
+  const xApiKey = req.headers.get("x-api-key") || "";
+  const authHeader = req.headers.get("authorization") || "";
 
   let apiKey = "";
-  if (xApiKey && xApiKey.trim()) {
+  if (xApiKey.trim()) {
     apiKey = xApiKey.trim();
-  } else if (authHeader && authHeader.startsWith("Bearer ")) {
+  } else if (authHeader.startsWith("Bearer ")) {
     apiKey = authHeader.substring(7).trim();
   } else if (authHeader && authHeader !== "anonymous") {
     apiKey = authHeader.trim();
