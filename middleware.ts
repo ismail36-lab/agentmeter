@@ -101,7 +101,7 @@ export async function middleware(request: NextRequest) {
         );
 
         return NextResponse.json(
-          { error: "Rate limit exceeded" },
+          { error: "Too Many Requests", message: "Rate limit exceeded." },
           {
             status: 429,
             headers: {

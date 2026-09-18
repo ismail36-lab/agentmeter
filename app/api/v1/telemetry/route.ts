@@ -7,28 +7,9 @@ import { getCacheReadMultiplier } from "@/lib/pricing";
 import crypto from "crypto";
 import { sendBudgetAlert } from "@/lib/budget-alerts";
 import { sendAnomalyAlert } from "@/lib/anomaly-alerts";
-import { checkRateLimit } from "@/lib/rate-limit";
-import { Redis } from "@upstash/redis";
-import { Ratelimit } from "@upstash/ratelimit";
+import { checkRateLimitAsync } from "@/lib/rate-limiter";
 
 export const dynamic = "force-dynamic";
-
-// Initialize Upstash Redis and Ratelimit from process.env
-const redisUrl = process.env.UPSTASH_REDIS_REST_URL;
-const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN;
-
-const redis = (redisUrl && redisToken)
-  ? new Redis({ url: redisUrl, token: redisToken })
-  : null;
-
-const ratelimit = redis
-  ? new Ratelimit({
-      redis,
-      limiter: Ratelimit.slidingWindow(60, "1 m"),
-      analytics: true,
-      prefix: "rate_limit:telemetry",
-    })
-  : null;
 
 async function getOwnerEmail(userId: string | null): Promise<string | null> {
   if (!userId) return null;
@@ -85,29 +66,7 @@ export async function POST(req: NextRequest) {
 
   const requestedKeyIdHeader = req.headers.get("x-key-id");
 
-  // Consistent identifier for rate limiting: API key, Bearer token, or fallback IP
-  const identifier = apiKey || authHeader || clientIp;
-
-  // ── 2. Strictly enforce Upstash Redis rate limit (60 req / 1 m) upfront ────
-  if (ratelimit) {
-    const { success } = await ratelimit.limit(identifier);
-    if (!success) {
-      return NextResponse.json(
-        { error: "Too Many Requests" },
-        { status: 429, headers: getCorsHeaders() }
-      );
-    }
-  } else {
-    const rateLimitResult = await checkRateLimit(identifier, 60);
-    if (!rateLimitResult.allowed) {
-      return NextResponse.json(
-        { error: "Too Many Requests" },
-        { status: 429, headers: getCorsHeaders() }
-      );
-    }
-  }
-
-  // ── 3. Resolve identity + plan AFTER rate-limit check ──────────────────────
+  // ── 2. Resolve identity + plan BEFORE rate limiting check ──────────────────
   let userId: string | null = null;
   let apiKeyRecord: any = null;
 
@@ -186,6 +145,15 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Require valid authentication
+  if (!apiKeyRecord || !userId) {
+    console.log("[telemetry-auth] Authentication FAILED: Invalid API Key and no active user session found");
+    return NextResponse.json(
+      { error: "Secret key missing or invalid, and no active user session found" },
+      { status: 401, headers: getCorsHeaders() }
+    );
+  }
+
   // Resolve plan from public.profiles (single source of truth)
   let userPlan = "free";
   if (userId) {
@@ -204,12 +172,24 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // ── 4. Now that traffic has passed the rate limiter, require valid auth ───
-  if (!apiKeyRecord || !userId) {
-    console.log("[telemetry-auth] Authentication FAILED: Invalid API Key and no active user session found");
+  // ── 3. Post-Authentication Plan-Based Rate Limit Check ──────────────────────
+  const rateLimitIdentifier = `telemetry:${apiKeyRecord.id || userId}`;
+  const rateLimitResult = await checkRateLimitAsync(rateLimitIdentifier, userPlan);
+
+  if (!rateLimitResult.allowed) {
+    const retryAfterSec = Math.ceil((rateLimitResult.retryAfterMs || 60000) / 1000);
     return NextResponse.json(
-      { error: "Secret key missing or invalid, and no active user session found" },
-      { status: 401, headers: getCorsHeaders() }
+      { error: "Too Many Requests", message: "Rate limit exceeded." },
+      {
+        status: 429,
+        headers: {
+          ...getCorsHeaders(),
+          "Retry-After": String(retryAfterSec),
+          "X-RateLimit-Limit": String(rateLimitResult.limit),
+          "X-RateLimit-Remaining": String(Math.max(0, rateLimitResult.remaining)),
+          "X-RateLimit-Reset": String(Math.ceil((Date.now() + (rateLimitResult.retryAfterMs || 60000)) / 1000)),
+        },
+      }
     );
   }
 

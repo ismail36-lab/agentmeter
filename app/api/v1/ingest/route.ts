@@ -125,21 +125,21 @@ export async function POST(req: NextRequest) {
       const keyBucketId = `ingest:${userId}`;
       const rateLimitResult = await checkRateLimitAsync(keyBucketId, planType);
       if (!rateLimitResult.allowed) {
-        const retryAfterSec = Math.ceil(rateLimitResult.retryAfterMs / 1000);
+        const retryAfterSec = Math.ceil((rateLimitResult.retryAfterMs || 60000) / 1000);
         console.warn(
           `[ingest] Rate limit exceeded for user=${userId} plan=${planType} ` +
           `count=${rateLimitResult.current}/${rateLimitResult.limit}`
         );
         return NextResponse.json(
-          { error: "Rate limit exceeded" },
+          { error: "Too Many Requests", message: "Rate limit exceeded." },
           {
             status: 429,
             headers: {
               ...getCorsHeaders(),
               "Retry-After": String(retryAfterSec),
               "X-RateLimit-Limit": String(rateLimitResult.limit),
-              "X-RateLimit-Remaining": "0",
-              "X-RateLimit-Reset": String(Math.ceil((Date.now() + rateLimitResult.retryAfterMs) / 1000)),
+              "X-RateLimit-Remaining": String(Math.max(0, rateLimitResult.remaining)),
+              "X-RateLimit-Reset": String(Math.ceil((Date.now() + (rateLimitResult.retryAfterMs || 60000)) / 1000)),
             },
           }
         );
