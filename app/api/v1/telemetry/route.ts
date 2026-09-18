@@ -11,6 +11,15 @@ import { checkRateLimit } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
+// Plan -> requests/minute. Keep in sync with lib/rate-limiter.ts RATE_LIMITS
+// and the pricing page. "free" is also the safe default for any caller
+// whose plan cannot yet be resolved (e.g. auth failed).
+const PLAN_RATE_LIMITS: Record<string, number> = {
+  free: 60,
+  pro: 1_000,
+  enterprise: 100_000, // effectively unmetered at this layer; edge cap in middleware.ts still applies
+};
+
 async function getOwnerEmail(userId: string | null): Promise<string | null> {
   if (!userId) return null;
   try {
@@ -64,131 +73,164 @@ export async function POST(req: NextRequest) {
     req.headers.get("x-real-ip") ||
     "127.0.0.1";
 
-  // SHA-256 hash API key for key formatting, or fallback to client IP
-  const keyHash = apiKey
-    ? crypto.createHash("sha256").update(apiKey).digest("hex")
-    : `ip:${clientIp}`;
+  const requestedKeyIdHeader = req.headers.get("x-key-id");
 
-  // ── 2. Enforce Strict Rate Limiting at VERY TOP of handler ─────────────────
-  const rateLimitResult = await checkRateLimit(keyHash);
-  console.log("Rate limit check result:", rateLimitResult);
+  // ── 2. Resolve identity + plan BEFORE any pricing/budget/DB-insert work ────
+  //
+  // NOTE ON ORDERING: Free (60/min) vs Pro (1,000/min) cannot be told apart
+  // without knowing *who* is calling, which requires one indexed lookup
+  // (verifyApiKey -> api_keys.key_hash). We therefore resolve identity here,
+  // immediately, and BEFORE any of the heavier work below (quota counting,
+  // model_pricing lookups, budget-cap checks, the usage_logs insert). This
+  // preserves the original intent — reject abusive traffic before doing
+  // expensive work — while still applying the *correct* per-plan ceiling.
+  // A flat, pre-auth limit (as in middleware.ts's edge cap) can only ever
+  // enforce one blanket number for every caller; it cannot enforce "60 for
+  // Free, 1,000 for Pro" by definition.
+  let userId: string | null = null;
+  let apiKeyRecord: any = null;
 
-  if (!rateLimitResult.success || rateLimitResult.remaining < 0 || (rateLimitResult.current ?? 0) > 60) {
+  if (apiKey) {
+    const authResult = await verifyApiKey(apiKey);
+    if (authResult.success && authResult.apiKeyRecord) {
+      apiKeyRecord = authResult.apiKeyRecord;
+      userId = authResult.userId ?? null;
+    }
+  }
+
+  let requestedKeyId: string | null = null;
+
+  if (!apiKeyRecord) {
+    // Try resolving active user session via cookies
+    try {
+      const supabase = createClient();
+      const { data: { user: sessionUser } } = await supabase.auth.getUser();
+      if (sessionUser) {
+        userId = sessionUser.id;
+      }
+    } catch (err) {
+      console.warn("[telemetry-auth] Notice reading session cookies:", err);
+    }
+
+    // Try resolving Bearer token as a Supabase JWT if cookie didn't yield a user
+    if (!userId && authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.substring(7).trim();
+      if (token && !token.startsWith("mx_")) {
+        const { data: { user: jwtUser } } = await supabaseAdmin.auth.getUser(token);
+        if (jwtUser) {
+          userId = jwtUser.id;
+        }
+      }
+    }
+
+    if (userId) {
+      // key_id may arrive via header or (once we parse it below) via body;
+      // the header covers the common dashboard-tester case cheaply.
+      requestedKeyId = requestedKeyIdHeader;
+
+      if (requestedKeyId) {
+        const { data: foundKey } = await supabaseAdmin
+          .from("api_keys")
+          .select("*")
+          .eq("id", requestedKeyId)
+          .eq("user_id", userId)
+          .maybeSingle();
+        if (foundKey) {
+          apiKeyRecord = foundKey;
+        }
+      }
+
+      if (!apiKeyRecord) {
+        const { data: primaryKey } = await supabaseAdmin
+          .from("api_keys")
+          .select("*")
+          .eq("user_id", userId)
+          .eq("is_active", true)
+          .order("created_at", { ascending: true })
+          .limit(1)
+          .maybeSingle();
+
+        if (primaryKey) {
+          apiKeyRecord = primaryKey;
+        } else {
+          // Fallback synthetic key if user has no keys in DB yet
+          apiKeyRecord = {
+            id: requestedKeyId || "internal-tester",
+            user_id: userId,
+            name: "Dashboard Tester",
+            is_active: true,
+          };
+        }
+      }
+    }
+  }
+
+  // Resolve plan from public.profiles (single source of truth) — done ONCE
+  // here and reused below for the quota check, instead of querying twice.
+  let userPlan = "free";
+  if (userId) {
+    try {
+      const { data: profile } = await supabaseAdmin
+        .from("profiles")
+        .select("plan")
+        .eq("id", userId)
+        .maybeSingle();
+
+      if (profile?.plan) {
+        userPlan = String(profile.plan).toLowerCase();
+      }
+    } catch (err) {
+      console.warn("[telemetry-auth] Could not fetch plan, defaulting to free for rate-limit + quota:", err);
+    }
+  }
+
+  // ── 3. Enforce plan-aware rate limit — still before ANY telemetry business
+  //       logic (quota count, pricing lookup, budget check, DB insert). ─────
+  const rateLimitScope = apiKeyRecord?.id
+    ? `key:${apiKeyRecord.id}`
+    : userId
+      ? `user:${userId}`
+      : `ip:${clientIp}`;
+
+  const planLimit = PLAN_RATE_LIMITS[userPlan] ?? PLAN_RATE_LIMITS.free;
+  const rateLimitResult = await checkRateLimit(rateLimitScope, planLimit);
+  console.log("[telemetry] Rate limit check:", { scope: rateLimitScope, plan: userPlan, ...rateLimitResult });
+
+  if (!rateLimitResult.allowed) {
     return NextResponse.json(
-      { error: "Too Many Requests", message: "Rate limit exceeded. Try again in a minute." },
-      { status: 429, headers: getCorsHeaders() }
+      {
+        error: "Too Many Requests",
+        message: `Rate limit exceeded. Maximum ${planLimit} requests per minute allowed on the ${userPlan} tier.`,
+      },
+      {
+        status: 429,
+        headers: {
+          ...getCorsHeaders(),
+          "Retry-After": String(Math.ceil(rateLimitResult.retryAfterMs / 1000)),
+        },
+      }
+    );
+  }
+
+  // ── 4. Now that traffic has passed the rate limiter, require valid auth ───
+  if (!apiKeyRecord || !userId) {
+    console.log("[telemetry-auth] Authentication FAILED: Invalid API Key and no active user session found");
+    return NextResponse.json(
+      { error: "Secret key missing or invalid, and no active user session found" },
+      { status: 401, headers: getCorsHeaders() }
     );
   }
 
   try {
-    // 3. Parse JSON Body early
+    // 5. Parse JSON Body
     const body = await req.json().catch(() => ({}));
-    const requestedKeyId = body.key_id || body.keyId || req.headers.get("x-key-id");
-
-    let userId: string | null = null;
-    let apiKeyRecord: any = null;
-
-    // 3a. Primary Auth Path: Attempt API Key verification if key is provided
-    if (apiKey) {
-      const authResult = await verifyApiKey(apiKey);
-      if (authResult.success && authResult.apiKeyRecord) {
-        apiKeyRecord = authResult.apiKeyRecord;
-        userId = authResult.userId ?? null;
-      }
+    // requestedKeyId from the body is honored for the dashboard tester flow,
+    // matching the original behavior (header already checked above).
+    if (!requestedKeyId) {
+      requestedKeyId = body.key_id || body.keyId || null;
     }
 
-    // 3b. Fallback Auth Path: Active dashboard session / cookies or JWT token
-    if (!apiKeyRecord) {
-      // Try resolving active user session via cookies
-      try {
-        const supabase = createClient();
-        const { data: { user: sessionUser } } = await supabase.auth.getUser();
-        if (sessionUser) {
-          userId = sessionUser.id;
-        }
-      } catch (err) {
-        console.warn("[telemetry-auth] Notice reading session cookies:", err);
-      }
-
-      // Try resolving Bearer token as a Supabase JWT if cookie didn't yield a user
-      if (!userId && authHeader && authHeader.startsWith("Bearer ")) {
-        const token = authHeader.substring(7).trim();
-        if (token && !token.startsWith("mx_")) {
-          const { data: { user: jwtUser } } = await supabaseAdmin.auth.getUser(token);
-          if (jwtUser) {
-            userId = jwtUser.id;
-          }
-        }
-      }
-
-      // If user session authenticated successfully:
-      if (userId) {
-        // Look up specified key_id in api_keys DB
-        if (requestedKeyId) {
-          const { data: foundKey } = await supabaseAdmin
-            .from("api_keys")
-            .select("*")
-            .eq("id", requestedKeyId)
-            .eq("user_id", userId)
-            .maybeSingle();
-          if (foundKey) {
-            apiKeyRecord = foundKey;
-          }
-        }
-
-        // If not found by key_id, look up primary active key for user
-        if (!apiKeyRecord) {
-          const { data: primaryKey } = await supabaseAdmin
-            .from("api_keys")
-            .select("*")
-            .eq("user_id", userId)
-            .eq("is_active", true)
-            .order("created_at", { ascending: true })
-            .limit(1)
-            .maybeSingle();
-
-          if (primaryKey) {
-            apiKeyRecord = primaryKey;
-          } else {
-            // Fallback synthetic key if user has no keys in DB yet
-            apiKeyRecord = {
-              id: requestedKeyId || "internal-tester",
-              user_id: userId,
-              name: "Dashboard Tester",
-              is_active: true,
-            };
-          }
-        }
-      }
-    }
-
-    if (!apiKeyRecord || !userId) {
-      console.log("[telemetry-auth] Authentication FAILED: Invalid API Key and no active user session found");
-      return NextResponse.json(
-        { error: "Secret key missing or invalid, and no active user session found" },
-        { status: 401, headers: getCorsHeaders() }
-      );
-    }
-
-    // 2b. Quota Limit Enforcement: Read plan from public.profiles (single source of truth)
-    let userPlan = "free";
-    if (userId) {
-      try {
-        const { data: profile } = await supabaseAdmin
-          .from("profiles")
-          .select("plan")
-          .eq("id", userId)
-          .maybeSingle();
-
-        if (profile?.plan) {
-          userPlan = String(profile.plan).toLowerCase();
-        }
-      } catch (err) {
-        console.warn("Could not fetch plan for quota check:", err);
-      }
-    }
-
-    // Query usage_logs table to count total logs for the current org/user
+    // 5a. Quota Limit Enforcement — reuses userPlan resolved above, no second query
     let totalLogsCount = 0;
     try {
       let countQuery = supabaseAdmin
@@ -213,7 +255,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 3. Extract JSON Body fields (parsed at top of handler)
+    // 6. Extract JSON Body fields
     const { model, prompt_tokens, completion_tokens, input_tokens, output_tokens, metadata } = body;
 
     const pTokens = Number(prompt_tokens ?? input_tokens ?? 0);
@@ -261,7 +303,7 @@ export async function POST(req: NextRequest) {
 
     const totalTokens = pTokens + cTokens;
 
-    // 4. Dynamic pricing lookup from `model_pricing` DB table
+    // 7. Dynamic pricing lookup from `model_pricing` DB table
     const modelKey = String(model).toLowerCase().trim();
 
     let roundedCost = 0;
@@ -270,12 +312,10 @@ export async function POST(req: NextRequest) {
     let warning: string | undefined;
     let provider = body.provider || "custom";
 
-    // 4a. Query model_pricing for an active record
     let activePricing: ModelPricingRow | null = null;
     let fallbackPricing: ModelPricingRow | null = null;
 
     try {
-      // First try: active record for this model
       let { data: activeRow } = await supabaseAdmin
         .from("model_pricing")
         .select("model, provider, input_price_per_million, output_price_per_million, is_active")
@@ -304,7 +344,6 @@ export async function POST(req: NextRequest) {
       if (activeRow) {
         activePricing = activeRow as ModelPricingRow;
       } else {
-        // Fallback: any record for this model (inactive / last-known rate)
         let { data: fallbackRow } = await supabaseAdmin
           .from("model_pricing")
           .select("model, provider, input_price_per_million, output_price_per_million, is_active")
@@ -341,7 +380,6 @@ export async function POST(req: NextRequest) {
     }
 
     if (activePricing) {
-      // Active and valid model
       isEstimated = false;
       provider = activePricing.provider || provider;
 
@@ -365,7 +403,6 @@ export async function POST(req: NextRequest) {
       roundedCost = Number(calculatedCost.toFixed(6));
       cacheSavingsUSD = Number((safeCached * (inputRate - cacheReadRate)).toFixed(6));
     } else if (fallbackPricing) {
-      // Deprecated / inactive model (cost calculated using last-known rate)
       isEstimated = true;
       warning = "model deprecated or unrecognized, cost is an estimate";
       provider = fallbackPricing.provider || provider;
@@ -390,7 +427,6 @@ export async function POST(req: NextRequest) {
       roundedCost = Number(calculatedCost.toFixed(6));
       cacheSavingsUSD = Number((safeCached * (inputRate - cacheReadRate)).toFixed(6));
     } else {
-      // Unrecognized model (cost calculated using explicit cost or standard default fallback rate)
       isEstimated = true;
       warning = "model deprecated or unrecognized, cost is an estimate";
 
@@ -405,7 +441,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 4b. Circuit Breaker Spend Check on api_keys
+    // 8. Circuit Breaker Spend Check on api_keys
     let budgetWarning: string | undefined;
 
     if (apiKeyRecord?.id) {
@@ -419,16 +455,14 @@ export async function POST(req: NextRequest) {
       const projectName = apiKeyRecord.name || "API Key Project";
 
       if (budgetCap !== null && budgetCap > 0 && newSpend > budgetCap) {
-        // Trigger background webhook notification
         dispatchWebhookAlert({
           event: "budget_exceeded",
           apiKeyName: projectName,
           currentSpend: newSpend,
           budgetCap,
           userId,
-        }).catch(() => {/* silent */});
+        }).catch(() => {/* silent */ });
 
-        // Send critical alert email asynchronously if action is block_new_logs or revoke_key
         if (action === "block_new_logs" || action === "revoke_key") {
           (async () => {
             const ownerEmail = await getOwnerEmail(userId);
@@ -453,7 +487,6 @@ export async function POST(req: NextRequest) {
         }
 
         if (action === "revoke_key") {
-          // Suspend API key instantly
           await supabaseAdmin
             .from("api_keys")
             .update({ is_active: false, status: "suspended" })
@@ -465,22 +498,18 @@ export async function POST(req: NextRequest) {
           );
         } else if (action === "alert_only") {
           budgetWarning = "Budget cap exceeded for this API key";
-          // Update current_period_spend_usd normally
           await supabaseAdmin
             .from("api_keys")
             .update({ current_period_spend_usd: newSpend })
             .eq("id", apiKeyRecord.id);
         } else {
-          // Default: 'block_new_logs'
           return NextResponse.json(
             { error: "Budget cap exceeded", action: "block_new_logs" },
             { status: 402, headers: getCorsHeaders() }
           );
         }
       } else {
-        // Check if 80%+ or 100% threshold warning alert should fire and budget_alert_sent is false
         if (budgetCap !== null && budgetCap > 0 && newSpend >= budgetCap * 0.8 && !budgetAlertSent) {
-          // Mark budget_alert_sent in DB
           await supabaseAdmin
             .from("api_keys")
             .update({ budget_alert_sent: true })
@@ -492,9 +521,8 @@ export async function POST(req: NextRequest) {
             currentSpend: newSpend,
             budgetCap,
             userId,
-          }).catch(() => {/* silent */});
+          }).catch(() => {/* silent */ });
 
-          // Send warning alert email asynchronously
           (async () => {
             const ownerEmail = await getOwnerEmail(userId);
             if (ownerEmail) {
@@ -510,7 +538,6 @@ export async function POST(req: NextRequest) {
           })().catch((err) => console.error("[budget-alerts] Non-blocking warning email dispatch error:", err));
         }
 
-        // Within budget cap: update current_period_spend_usd
         await supabaseAdmin
           .from("api_keys")
           .update({ current_period_spend_usd: newSpend })
@@ -520,7 +547,7 @@ export async function POST(req: NextRequest) {
 
     const nowIso = new Date().toISOString();
 
-    // 5. Strictly sanitized minimal insert payload
+    // 9. Strictly sanitized minimal insert payload
     const keyData = apiKeyRecord;
     const calculatedCost = roundedCost;
 
@@ -538,7 +565,7 @@ export async function POST(req: NextRequest) {
       ...(agentTag && { agent_name: agentTag }),
     };
 
-    // 4c. Anomaly & Error Monitoring Check: cost spike or error rate spike
+    // 10. Anomaly & Error Monitoring Check
     const spikeThreshold = Number(apiKeyRecord?.spike_threshold_usd ?? 1.0);
     const statusCode = Number(body.status_code || 200);
 
@@ -578,7 +605,7 @@ export async function POST(req: NextRequest) {
 
     const logId = logData?.id || "log_" + Date.now();
 
-    // 6. Return response
+    // 11. Return response
     return NextResponse.json(
       {
         success: true,
