@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 
@@ -45,11 +46,14 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Provide ?key=<your_api_key>" }, { status: 400 });
   }
 
-  // 1. Raw lookup
+  const cleanKey = key.trim();
+  const computedHash = crypto.createHash("sha256").update(cleanKey).digest("hex");
+
+  // 1. Hash lookup via key_hash
   const { data: keyRecord, error: keyError } = await supabaseAdmin
     .from("api_keys")
-    .select("id, user_id, is_active, organization_id, key")
-    .eq("key", key)
+    .select("id, user_id, is_active, organization_id, key, key_hash, display_prefix, display_suffix")
+    .eq("key_hash", computedHash)
     .maybeSingle();
 
   // 2. Table row count

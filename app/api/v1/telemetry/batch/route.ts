@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { dispatchWebhookAlert } from "@/lib/webhooks";
+import { verifyApiKey } from "@/lib/auth/meterix";
 import { getCacheReadMultiplier } from "@/lib/pricing";
 import crypto from "crypto";
 import { sendBudgetAlert } from "@/lib/budget-alerts";
@@ -46,33 +47,22 @@ export async function OPTIONS() {
 async function resolveApiKey(
   apiKey: string
 ): Promise<{ userId: string | null; apiKeyRecord: any | null; error?: string }> {
-  const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
-
-  // Primary: hash lookup
-  const { data: hashData } = await supabaseAdmin
-    .from("api_keys")
-    .select("id, name, user_id, is_active, status, budget_cap_usd, current_period_spend_usd, budget_action, budget_cap_action, budget_alert_sent")
-    .eq("key_hash", keyHash)
-    .maybeSingle();
-
-  let data = hashData;
-
-  if (!data) {
-    // Fallback: raw key (legacy am_ keys)
-    const { data: legacyData } = await supabaseAdmin
-      .from("api_keys")
-      .select("id, name, user_id, is_active, status, budget_cap_usd, current_period_spend_usd, budget_action, budget_cap_action, budget_alert_sent")
-      .eq("key", apiKey)
-      .maybeSingle();
-    data = legacyData;
+  const authResult = await verifyApiKey(apiKey);
+  if (!authResult.success || !authResult.apiKeyRecord) {
+    return {
+      userId: null,
+      apiKeyRecord: null,
+      error: authResult.error || "Unauthorized: Invalid or inactive API Key",
+    };
   }
 
-  if (!data) return { userId: null, apiKeyRecord: null, error: "Unauthorized: Invalid or inactive API Key" };
-
+  const data = authResult.apiKeyRecord;
   const isActive = data.is_active !== false && data.status !== "inactive";
-  if (!isActive) return { userId: null, apiKeyRecord: null, error: "Unauthorized: API Key is inactive" };
+  if (!isActive) {
+    return { userId: null, apiKeyRecord: null, error: "Unauthorized: API Key is inactive" };
+  }
 
-  return { userId: data.user_id ?? null, apiKeyRecord: data };
+  return { userId: authResult.userId ?? data.user_id ?? null, apiKeyRecord: data };
 }
 
 // ── Quota helper ──────────────────────────────────────────────────────────────
