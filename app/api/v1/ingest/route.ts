@@ -1,22 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase/admin";
-import { checkRateLimit, checkRateLimitAsync } from "@/lib/rate-limiter";
-import crypto from "crypto";
+import { POST as telemetryPOST } from "@/app/api/v1/telemetry/route";
 
 export const dynamic = "force-dynamic";
-
-// Plan → monthly log limit (mirrors app/api/plan/route.ts)
-const PLAN_LIMITS: Record<string, number> = {
-  free: 5000,
-  pro: 250000,
-  enterprise: 1000000,
-};
 
 function getCorsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key, x-key-id",
   };
 }
 
@@ -24,223 +15,38 @@ export async function OPTIONS() {
   return NextResponse.json({}, { headers: getCorsHeaders() });
 }
 
+/**
+ * Delegate ingestion to the canonical /api/v1/telemetry route provider.
+ * Guarantees server-side model pricing calculation via model_pricing DB lookups
+ * and prevents reliance on client-reported cost fields.
+ */
 export async function POST(req: NextRequest) {
   try {
-    // ── 1. Extract API key ────────────────────────────────────────────────
-    const xApiKey = req.headers.get("x-api-key");
-    const authHeader = req.headers.get("authorization");
+    const response = await telemetryPOST(req);
 
-    let apiKey = "";
-    if (xApiKey) {
-      apiKey = xApiKey.trim();
-    } else if (authHeader && authHeader.startsWith("Bearer ")) {
-      apiKey = authHeader.substring(7).trim();
+    // If telemetryPOST returned an error status (e.g. 401, 429, 400, 402, 403, 500),
+    // pass through the response directly with status and headers intact.
+    if (!response.ok) {
+      return response;
     }
 
-    if (!apiKey) {
-      return NextResponse.json(
-        { error: "Unauthorized: Missing API Key" },
-        { status: 401, headers: getCorsHeaders() }
-      );
-    }
+    // Parse the successful canonical telemetry payload
+    const data = await response.json();
 
-    // ── 2. Validate key against api_keys table ────────────────────────────
-    const keyHash = crypto.createHash("sha256").update(apiKey).digest("hex");
-
-    let userId: string | null = null;
-    let keyValid = false;
-    let keyInactive = false;
-
-    try {
-      // Primary lookup: SHA-256 key_hash
-      const { data: hashData, error: hashError } = await supabaseAdmin
-        .from("api_keys")
-        .select("id, user_id, is_active")
-        .eq("key_hash", keyHash)
-        .maybeSingle();
-
-      let data = hashData;
-
-      if (!data && !hashError) {
-        // Secondary fallback: raw key column
-        const { data: legacyData } = await supabaseAdmin
-          .from("api_keys")
-          .select("id, user_id, is_active")
-          .eq("key", apiKey)
-          .maybeSingle();
-        data = legacyData;
-      }
-
-      if (data) {
-        if (data.is_active === false) {
-          keyInactive = true;
-        } else {
-          keyValid = true;
-          userId = data.user_id ?? null;
-        }
-      }
-    } catch (err) {
-      console.warn("[ingest] api_keys lookup exception:", err);
-    }
-
-    if (keyInactive) {
-      return NextResponse.json(
-        { error: "Unauthorized: API Key is inactive" },
-        { status: 401, headers: getCorsHeaders() }
-      );
-    }
-
-    if (!keyValid) {
-      return NextResponse.json(
-        { error: "Unauthorized: Invalid API Key" },
-        { status: 401, headers: getCorsHeaders() }
-      );
-    }
-
-    // ── 3. Resolve plan & monthly limit ───────────────────────────────────
-    let planType = "free";
-
-    if (userId) {
-      try {
-        // Single source of truth: profiles table
-        const { data: profile } = await supabaseAdmin
-          .from("profiles")
-          .select("plan")
-          .eq("id", userId)
-          .maybeSingle();
-
-        if (profile?.plan) {
-          planType = String(profile.plan).toLowerCase();
-        }
-      } catch (err) {
-        console.warn("[ingest] plan resolution warning:", err);
-      }
-    }
-
-    const monthlyLogLimit = PLAN_LIMITS[planType] ?? PLAN_LIMITS.free;
-
-    // ── Rate Limit Enforcement (per-key, per-minute) ─────────────────────
-    if (userId) {
-      // Resolve the canonical key ID for rate-limit bucketing
-      const keyBucketId = `ingest:${userId}`;
-      const rateLimitResult = await checkRateLimitAsync(keyBucketId, planType);
-      if (!rateLimitResult.allowed) {
-        const retryAfterSec = Math.ceil((rateLimitResult.retryAfterMs || 60000) / 1000);
-        console.warn(
-          `[ingest] Rate limit exceeded for user=${userId} plan=${planType} ` +
-          `count=${rateLimitResult.current}/${rateLimitResult.limit}`
-        );
-        return NextResponse.json(
-          { error: "Too Many Requests", message: "Rate limit exceeded." },
-          {
-            status: 429,
-            headers: {
-              ...getCorsHeaders(),
-              "Retry-After": String(retryAfterSec),
-              "X-RateLimit-Limit": String(rateLimitResult.limit),
-              "X-RateLimit-Remaining": String(Math.max(0, rateLimitResult.remaining)),
-              "X-RateLimit-Reset": String(Math.ceil((Date.now() + (rateLimitResult.retryAfterMs || 60000)) / 1000)),
-            },
-          }
-        );
-      }
-    }
-
-    // ── 4. Monthly quota check ────────────────────────────────────────────
-    const now = new Date();
-    const firstDayOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
-
-    let logCount = 0;
-    try {
-      const countQuery = supabaseAdmin
-        .from("usage_logs")
-        .select("id", { count: "exact", head: true })
-        .gte("created_at", firstDayOfMonth);
-
-      const { count, error: countErr } = userId
-        ? await countQuery.eq("user_id", userId)
-        : await countQuery;
-
-      if (countErr) {
-        console.warn("[ingest] usage_logs count warning:", countErr.message);
-      }
-      logCount = count ?? 0;
-    } catch (err) {
-      console.warn("[ingest] usage_logs count exception:", err);
-    }
-
-    console.log(`[ingest] user=${userId} plan=${planType} usage=${logCount}/${monthlyLogLimit}`);
-
-    // ── 5. Enforce quota → 429 ────────────────────────────────────────────
-    if (logCount >= monthlyLogLimit) {
-      return NextResponse.json(
-        {
-          error: "Monthly quota exceeded",
-          plan: planType,
-          limit: monthlyLogLimit,
-        },
-        { status: 429, headers: getCorsHeaders() }
-      );
-    }
-
-    // ── 6. Parse body & insert log ────────────────────────────────────────
-    const body = await req.json();
-    const { model, prompt_tokens, completion_tokens, input_tokens, output_tokens, provider } = body;
-    const pTokens = Number(prompt_tokens ?? input_tokens ?? 0);
-    const cTokens = Number(completion_tokens ?? output_tokens ?? 0);
-    const nowIso = new Date().toISOString();
-
-    const logPayload: Record<string, unknown> = {
-      user_id: userId,
-      provider: provider || "custom",
-      model: model ? String(model).toLowerCase().trim() : "unknown",
-      input_tokens: pTokens,
-      output_tokens: cTokens,
-      total_cost_usd: Number(body.total_cost_usd || body.cost || 0),
-      latency_ms: Number(body.latency_ms || body.latency) || 100,
-      status_code: 200,
-      timestamp: nowIso,
-      created_at: nowIso,
-    };
-
-    let logId: string | null = null;
-
-    try {
-      const { data: savedLog, error: insertError } = await supabaseAdmin
-        .from("usage_logs")
-        .insert([logPayload])
-        .select()
-        .single();
-
-      if (insertError) {
-        console.error("[ingest] usage_logs insert error:", insertError.message);
-        // Fallback: try telemetry_logs table
-        const { data: tLog } = await supabaseAdmin
-          .from("telemetry_logs")
-          .insert([{ ...logPayload, cost: logPayload.total_cost_usd, total_tokens: pTokens + cTokens }])
-          .select()
-          .single();
-        if (tLog?.id) logId = tLog.id;
-      } else {
-        logId = savedLog?.id ?? null;
-      }
-    } catch (err) {
-      console.warn("[ingest] log insert exception:", err);
-    }
-
+    // Augment with backward-compatible response fields expected by legacy /api/v1/ingest callers
     return NextResponse.json(
       {
-        success: true,
-        log_id: logId,
+        ...data,
         message: "Telemetry ingested successfully",
-        plan: planType,
-        usage: logCount + 1,
-        limit: monthlyLogLimit,
+        total_cost_usd: data.calculated_cost ?? data.total_cost_usd ?? 0,
       },
-      { status: 200, headers: getCorsHeaders() }
+      {
+        status: 200,
+        headers: response.headers,
+      }
     );
   } catch (error: any) {
-    console.error("[ingest] Unexpected top-level error:", error);
+    console.error("[ingest-wrapper] Error delegating to canonical telemetry route:", error);
     return NextResponse.json(
       { error: "Internal Server Error", details: error.message || String(error) },
       { status: 500, headers: getCorsHeaders() }
