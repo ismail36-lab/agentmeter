@@ -8,6 +8,7 @@ import crypto from "crypto";
 import { sendBudgetAlert } from "@/lib/budget-alerts";
 import { sendAnomalyAlert } from "@/lib/anomaly-alerts";
 import { checkRateLimitAsync } from "@/lib/rate-limiter";
+import { checkMonthlyQuota } from "@/lib/quota";
 
 export const dynamic = "force-dynamic";
 
@@ -202,27 +203,17 @@ export async function POST(req: NextRequest) {
       requestedKeyId = body.key_id || body.keyId || null;
     }
 
-    // 5a. Quota Limit Enforcement — reuses userPlan resolved above, no second query
-    let totalLogsCount = 0;
-    try {
-      let countQuery = supabaseAdmin
-        .from("usage_logs")
-        .select("id", { count: "exact", head: true });
-
-      if (userId) {
-        countQuery = countQuery.eq("user_id", userId);
-      }
-
-      const { count } = await countQuery;
-      totalLogsCount = count ?? 0;
-    } catch (err) {
-      console.warn("Quota usage count notice:", err);
-    }
-
-    // Enforce limit for free-tier users (count >= 5000) before any token/cost calculation or DB insert
-    if (totalLogsCount >= 5000 && userPlan === "free") {
+    // 5a. Monthly Quota Limit Enforcement — uses shared checkMonthlyQuota utility
+    const quotaResult = await checkMonthlyQuota(userId, userPlan);
+    if (!quotaResult.allowed) {
       return NextResponse.json(
-        { error: "Monthly log limit reached" },
+        {
+          error: "Monthly log limit reached",
+          message: `Monthly limit of ${quotaResult.monthlyLimit.toLocaleString()} logs reached for ${userPlan} plan. Resets at the start of next month.`,
+          plan: userPlan,
+          usage: quotaResult.currentCount,
+          limit: quotaResult.monthlyLimit,
+        },
         { status: 429, headers: getCorsHeaders() }
       );
     }

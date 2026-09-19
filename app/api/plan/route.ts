@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getStartOfCurrentMonthISO } from "@/lib/quota";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -43,8 +44,7 @@ export async function GET(req: NextRequest) {
     const tier = TIER_LIMITS[planKey];
 
     // Count monthly log usage for this user
-    const now = new Date();
-    const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const firstDayOfMonth = getStartOfCurrentMonthISO();
 
     const { count } = await supabaseAdmin
       .from("usage_logs")

@@ -5,6 +5,7 @@ import { getCacheReadMultiplier } from "@/lib/pricing";
 import crypto from "crypto";
 import { sendBudgetAlert } from "@/lib/budget-alerts";
 import { sendAnomalyAlert } from "@/lib/anomaly-alerts";
+import { checkMonthlyQuota } from "@/lib/quota";
 
 export const dynamic = "force-dynamic";
 
@@ -373,15 +374,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: authError }, { status: 401, headers: getCorsHeaders() });
     }
 
-    // 3. Quota enforcement (batch counts against total logs)
+    // 3. Monthly Quota Enforcement
     if (userId) {
-      const [plan, totalLogs] = await Promise.all([
-        getUserPlan(userId),
-        getTotalLogCount(userId),
-      ]);
-      if (totalLogs >= 5000 && plan === "free") {
+      const plan = await getUserPlan(userId);
+      const quotaResult = await checkMonthlyQuota(userId, plan);
+      if (!quotaResult.allowed) {
         return NextResponse.json(
-          { error: "Monthly log limit reached" },
+          {
+            error: "Monthly log limit reached",
+            message: `Monthly limit of ${quotaResult.monthlyLimit.toLocaleString()} logs reached for ${plan} plan. Resets at the start of next month.`,
+            plan,
+            usage: quotaResult.currentCount,
+            limit: quotaResult.monthlyLimit,
+          },
           { status: 429, headers: getCorsHeaders() }
         );
       }
