@@ -35,7 +35,7 @@ function getCorsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key, x-internal-test, x-key-id",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key, x-internal-test, x-key-id, x-idempotency-key, idempotency-key",
   };
 }
 
@@ -44,9 +44,10 @@ export async function OPTIONS() {
 }
 
 export async function POST(req: NextRequest) {
-  // ── 1. Extract Bearer token / API Key from request headers ─────────────────
+  // ── 1. Extract Bearer token / API Key & Idempotency Key from request headers ──
   const xApiKey = req.headers.get("x-api-key");
   const authHeader = req.headers.get("authorization");
+  const headerIdempotencyKey = req.headers.get("x-idempotency-key") || req.headers.get("idempotency-key");
 
   let apiKey = "";
   if (xApiKey && xApiKey.trim()) {
@@ -201,6 +202,53 @@ export async function POST(req: NextRequest) {
     // matching the original behavior (header already checked above).
     if (!requestedKeyId) {
       requestedKeyId = body.key_id || body.keyId || null;
+    }
+
+    const idempotencyKey = String(
+      headerIdempotencyKey || body.idempotency_key || body.idempotencyKey || body.idempotency || ""
+    ).trim() || null;
+
+    // 5b. Idempotency Check — return existing log response if key was already ingested
+    if (idempotencyKey) {
+      try {
+        const { data: existingLog } = await supabaseAdmin
+          .from("usage_logs")
+          .select("*")
+          .eq("idempotency_key", idempotencyKey)
+          .maybeSingle();
+
+        if (existingLog) {
+          const logCost = Number(existingLog.total_cost_usd ?? existingLog.cost_usd ?? existingLog.cost ?? 0);
+          const pToks = Number(existingLog.input_tokens || 0);
+          const cToks = Number(existingLog.output_tokens || 0);
+
+          return NextResponse.json(
+            {
+              success: true,
+              idempotent_replay: true,
+              log_id: existingLog.id,
+              model: existingLog.model || "gpt-4o",
+              prompt_tokens: pToks,
+              completion_tokens: cToks,
+              cached_tokens: Number(existingLog.cached_tokens || 0),
+              cache_creation_tokens: Number(existingLog.cache_creation_tokens || 0),
+              total_tokens: pToks + cToks,
+              calculated_cost: logCost,
+              total_cost_usd: logCost,
+              cache_savings_usd: Number(existingLog.cache_savings_usd || 0),
+              is_estimated: Boolean(existingLog.is_estimated ?? false),
+              environment: existingLog.environment || "production",
+              agent_name: existingLog.agent_name || "default-agent",
+              ...(existingLog.session_id && { session_id: existingLog.session_id }),
+              currency: "USD",
+              timestamp: existingLog.created_at || new Date().toISOString(),
+            },
+            { status: 200, headers: getCorsHeaders() }
+          );
+        }
+      } catch (err) {
+        console.warn("[idempotency-check] Pre-ingest query notice:", err);
+      }
     }
 
     // 5a. Monthly Quota Limit Enforcement — uses shared checkMonthlyQuota utility
@@ -514,7 +562,7 @@ export async function POST(req: NextRequest) {
     const keyData = apiKeyRecord;
     const calculatedCost = roundedCost;
 
-    const safeInsertPayload = {
+    const safeInsertPayload: Record<string, any> = {
       user_id: keyData.user_id,
       model: body.model,
       provider: body.provider || 'openai',
@@ -526,6 +574,7 @@ export async function POST(req: NextRequest) {
       is_estimated: Boolean(body.is_estimated ?? false),
       ...(sessionIdTag && { session_id: sessionIdTag }),
       ...(agentTag && { agent_name: agentTag }),
+      ...(idempotencyKey && { idempotency_key: idempotencyKey }),
     };
 
     // 10. Anomaly & Error Monitoring Check
@@ -552,11 +601,72 @@ export async function POST(req: NextRequest) {
       })().catch((err) => console.error("[anomaly-alerts] Non-blocking anomaly email dispatch error:", err));
     }
 
-    const { data: logData, error: logError } = await supabaseAdmin
+    let logData: any = null;
+    let { data: insertedData, error: logError } = await supabaseAdmin
       .from("usage_logs")
       .insert(safeInsertPayload)
       .select()
       .single();
+
+    logData = insertedData;
+
+    if (logError && idempotencyKey) {
+      // Handle potential race condition or duplicate key insertion
+      try {
+        const { data: existingLog } = await supabaseAdmin
+          .from("usage_logs")
+          .select("*")
+          .eq("idempotency_key", idempotencyKey)
+          .maybeSingle();
+
+        if (existingLog) {
+          const logCost = Number(existingLog.total_cost_usd ?? existingLog.cost_usd ?? existingLog.cost ?? 0);
+          const pToks = Number(existingLog.input_tokens || 0);
+          const cToks = Number(existingLog.output_tokens || 0);
+
+          return NextResponse.json(
+            {
+              success: true,
+              idempotent_replay: true,
+              log_id: existingLog.id,
+              model: existingLog.model || "gpt-4o",
+              prompt_tokens: pToks,
+              completion_tokens: cToks,
+              cached_tokens: Number(existingLog.cached_tokens || 0),
+              cache_creation_tokens: Number(existingLog.cache_creation_tokens || 0),
+              total_tokens: pToks + cToks,
+              calculated_cost: logCost,
+              total_cost_usd: logCost,
+              cache_savings_usd: Number(existingLog.cache_savings_usd || 0),
+              is_estimated: Boolean(existingLog.is_estimated ?? false),
+              environment: existingLog.environment || "production",
+              agent_name: existingLog.agent_name || "default-agent",
+              ...(existingLog.session_id && { session_id: existingLog.session_id }),
+              currency: "USD",
+              timestamp: existingLog.created_at || new Date().toISOString(),
+            },
+            { status: 200, headers: getCorsHeaders() }
+          );
+        }
+      } catch (e) {}
+
+      // If idempotency_key column is not present in table schema, fallback to inserting without it
+      if (logError.message?.includes("idempotency_key")) {
+        delete safeInsertPayload.idempotency_key;
+        const { data: retryData, error: retryError } = await supabaseAdmin
+          .from("usage_logs")
+          .insert(safeInsertPayload)
+          .select()
+          .single();
+
+        if (!retryError && retryData) {
+          logData = retryData;
+          logError = null;
+        } else if (retryError) {
+          logError = retryError;
+        }
+      }
+    }
 
     if (logError) {
       console.error("[telemetry-ingest] Supabase insert error:", logError.message, logError.details);
