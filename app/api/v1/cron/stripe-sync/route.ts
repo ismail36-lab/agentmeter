@@ -4,12 +4,18 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+export type RevenueSource = "lemonsqueezy_active" | "plan_estimate" | "free";
+
 export interface CustomerMarginItem {
   user_id: string;
   email: string;
-  stripe_customer_id: string | null;
+  lemon_squeezy_customer_id: string | null;
+  lemon_squeezy_subscription_id: string | null;
   plan: string;
+  subscription_status: string | null;
   revenue: number;
+  revenue_source: RevenueSource;
+  is_revenue_estimated: boolean;
   total_cost: number;
   margin: number;
   margin_percentage: number;
@@ -18,48 +24,53 @@ export interface CustomerMarginItem {
   last_synced_at: string;
 }
 
-/** Helper to fetch revenue from Stripe REST API safely */
-async function fetchStripeRevenueForCustomer(
-  stripeCustomerId: string,
-  stripeSecretKey: string
-): Promise<number> {
+/**
+ * Fetches the actual subscription price for a Lemon Squeezy variant.
+ * Returns null if the API is unavailable (callers fall back to env var).
+ */
+async function fetchLemonSqueezyVariantPrice(
+  variantId: string,
+  lsApiKey: string
+): Promise<number | null> {
   try {
     const res = await fetch(
-      `https://api.stripe.com/v1/invoices?customer=${encodeURIComponent(stripeCustomerId)}&status=paid&limit=100`,
+      `https://api.lemonsqueezy.com/v1/variants/${encodeURIComponent(variantId)}`,
       {
         headers: {
-          Authorization: `Bearer ${stripeSecretKey}`,
+          Authorization: `Bearer ${lsApiKey}`,
+          Accept: "application/vnd.api+json",
         },
       }
     );
 
     if (!res.ok) {
-      console.warn(`Stripe API returned ${res.status} for customer ${stripeCustomerId}`);
-      return 0;
+      console.warn(`[margin-sync] Lemon Squeezy variants API returned ${res.status} for variant ${variantId}`);
+      return null;
     }
 
     const data = await res.json();
-    const invoices = data?.data || [];
-    const totalCents = invoices.reduce(
-      (acc: number, inv: any) => acc + Number(inv.amount_paid || inv.total || 0),
-      0
-    );
-    return Number((totalCents / 100).toFixed(2));
+    const priceCents: number | undefined = data?.data?.attributes?.price;
+
+    if (typeof priceCents === "number" && priceCents > 0) {
+      return Number((priceCents / 100).toFixed(2));
+    }
+
+    return null;
   } catch (err) {
-    console.warn(`Error fetching Stripe revenue for ${stripeCustomerId}:`, err);
-    return 0;
+    console.warn(`[margin-sync] Error fetching Lemon Squeezy variant price for ${variantId}:`, err);
+    return null;
   }
 }
 
 export async function GET(req: NextRequest) {
-  return handleStripeSync(req);
+  return handleMarginSync(req);
 }
 
 export async function POST(req: NextRequest) {
-  return handleStripeSync(req);
+  return handleMarginSync(req);
 }
 
-async function handleStripeSync(req: NextRequest) {
+async function handleMarginSync(req: NextRequest) {
   const cronSecret = process.env.CRON_SECRET;
   const authHeader = req.headers.get("authorization");
 
@@ -74,26 +85,52 @@ async function handleStripeSync(req: NextRequest) {
   };
 
   try {
-    const stripeSecretKey = process.env.STRIPE_SECRET_KEY || "";
+    // ── 1. Resolve the pro subscription price from Lemon Squeezy (once per sync) ──
+    const lsApiKey = process.env.LEMONSQUEEZY_API_KEY || "";
+    const lsVariantId = process.env.LEMONSQUEEZY_PRO_VARIANT_ID || "";
+    const lsFallbackPriceUSD = Number(process.env.LEMONSQUEEZY_PRO_PRICE_USD ?? 29);
 
-    // 1. Fetch user profiles from public.profiles
-    const { data: profiles, error: profileError } = await supabaseAdmin
-      .from("profiles")
-      .select("id, email, stripe_customer_id, plan");
+    let proPriceUSD = lsFallbackPriceUSD;
+    let proPriceIsLive = false;
 
-    if (profileError) {
-      console.warn("Stripe sync profile fetch notice:", profileError.message);
+    if (lsApiKey && lsVariantId) {
+      const fetchedPrice = await fetchLemonSqueezyVariantPrice(lsVariantId, lsApiKey);
+      if (fetchedPrice !== null) {
+        proPriceUSD = fetchedPrice;
+        proPriceIsLive = true;
+        console.log(`[margin-sync] Resolved Pro subscription price: $${proPriceUSD} (live from Lemon Squeezy)`);
+      } else {
+        console.warn(`[margin-sync] Falling back to env LEMONSQUEEZY_PRO_PRICE_USD=$${lsFallbackPriceUSD}`);
+      }
     }
 
-    // 2. Fetch auth users if profiles table is empty/missing
-    let usersList: { id: string; email: string; stripe_customer_id: string | null; plan: string }[] = [];
+    // ── 2. Fetch user profiles from public.profiles (Lemon Squeezy as source of truth) ──
+    const { data: profiles, error: profileError } = await supabaseAdmin
+      .from("profiles")
+      .select("id, email, plan, subscription_status, lemon_squeezy_customer_id, lemon_squeezy_subscription_id");
+
+    if (profileError) {
+      console.warn("[margin-sync] Profile fetch notice:", profileError.message);
+    }
+
+    // ── 3. Fallback: list auth users if profiles table is empty ──
+    let usersList: {
+      id: string;
+      email: string;
+      plan: string;
+      subscription_status: string | null;
+      lemon_squeezy_customer_id: string | null;
+      lemon_squeezy_subscription_id: string | null;
+    }[] = [];
 
     if (profiles && profiles.length > 0) {
       usersList = profiles.map((p) => ({
         id: String(p.id),
         email: String(p.email || "user@example.com"),
-        stripe_customer_id: p.stripe_customer_id ? String(p.stripe_customer_id) : null,
         plan: String(p.plan || "free").toLowerCase(),
+        subscription_status: p.subscription_status ? String(p.subscription_status) : null,
+        lemon_squeezy_customer_id: p.lemon_squeezy_customer_id ? String(p.lemon_squeezy_customer_id) : null,
+        lemon_squeezy_subscription_id: p.lemon_squeezy_subscription_id ? String(p.lemon_squeezy_subscription_id) : null,
       }));
     } else {
       try {
@@ -102,22 +139,24 @@ async function handleStripeSync(req: NextRequest) {
           usersList = authUsers.users.map((u) => ({
             id: u.id,
             email: u.email || "user@example.com",
-            stripe_customer_id: null,
             plan: "free",
+            subscription_status: null,
+            lemon_squeezy_customer_id: null,
+            lemon_squeezy_subscription_id: null,
           }));
         }
       } catch (err) {
-        console.warn("Could not list auth users for stripe sync:", err);
+        console.warn("[margin-sync] Could not list auth users:", err);
       }
     }
 
-    // 3. Query usage_logs to calculate total LLM cost and request count per user_id
+    // ── 4. Aggregate LLM cost and request count per user from usage_logs ──
     const { data: logs, error: logsError } = await supabaseAdmin
       .from("usage_logs")
       .select("user_id, total_cost_usd, cost");
 
     if (logsError) {
-      console.warn("Stripe sync usage_logs fetch notice:", logsError.message);
+      console.warn("[margin-sync] usage_logs fetch notice:", logsError.message);
     }
 
     const userCostMap: Record<string, { total_cost: number; log_count: number }> = {};
@@ -140,80 +179,105 @@ async function handleStripeSync(req: NextRequest) {
       }
     });
 
-    // Also handle orphan logs if present
+    // Handle orphan logs
     if (userCostMap["orphan"] && !usersList.some((u) => u.id === "orphan")) {
       usersList.push({
         id: "orphan",
         email: "unassigned@telemetry.local",
-        stripe_customer_id: null,
         plan: "free",
+        subscription_status: null,
+        lemon_squeezy_customer_id: null,
+        lemon_squeezy_subscription_id: null,
       });
     }
 
     const nowIso = new Date().toISOString();
 
-    // 4. Compute revenue and margins for each customer
-    const customerMargins: CustomerMarginItem[] = await Promise.all(
-      usersList.map(async (u) => {
-        let revenue = 0;
+    // ── 5. Compute revenue and margins for each customer ──
+    const customerMargins: CustomerMarginItem[] = usersList.map((u) => {
+      let revenue = 0;
+      let revenueSource: RevenueSource = "free";
+      let isRevenueEstimated = false;
 
-        if (u.stripe_customer_id && stripeSecretKey) {
-          revenue = await fetchStripeRevenueForCustomer(u.stripe_customer_id, stripeSecretKey);
-        }
+      const isActivePro =
+        u.plan === "pro" &&
+        (u.subscription_status === "active" || u.subscription_status === "on_trial");
 
-        // Fallback revenue calculation if Stripe is not configured or returned 0
-        if (revenue === 0) {
-          if (u.plan === "pro") revenue = 99.0;
-          else if (u.plan === "enterprise") revenue = 499.0;
-          else revenue = 0.0;
-        }
+      const isInactivePro =
+        u.plan === "pro" && !isActivePro;
 
-        const costData = userCostMap[u.id] || { total_cost: 0, log_count: 0 };
-        const totalCost = Number(costData.total_cost.toFixed(4));
-        const margin = Number((revenue - totalCost).toFixed(4));
+      if (isActivePro) {
+        // Active/on-trial Pro subscriber — confirmed revenue from Lemon Squeezy pricing
+        revenue = proPriceUSD;
+        revenueSource = "lemonsqueezy_active";
+        // Revenue is only truly confirmed if the LS API returned a live price;
+        // if we fell back to the env var, mark as estimated.
+        isRevenueEstimated = !proPriceIsLive;
+      } else if (isInactivePro) {
+        // Cancelled/past-due Pro — subscription is no longer active, use price as estimate
+        revenue = proPriceUSD;
+        revenueSource = "plan_estimate";
+        isRevenueEstimated = true;
+      } else {
+        // Free tier — confirmed zero revenue
+        revenue = 0;
+        revenueSource = "free";
+        isRevenueEstimated = false;
+      }
 
-        let marginPercentage = 0;
-        if (revenue > 0) {
-          marginPercentage = Number(((margin / revenue) * 100).toFixed(1));
-        } else if (totalCost > 0) {
-          marginPercentage = -100;
-        }
+      const costData = userCostMap[u.id] || { total_cost: 0, log_count: 0 };
+      const totalCost = Number(costData.total_cost.toFixed(4));
+      const margin = Number((revenue - totalCost).toFixed(4));
 
-        let status: "unprofitable" | "low_margin" | "profitable" = "profitable";
-        if (margin < 0) {
-          status = "unprofitable";
-        } else if (marginPercentage < 30 || margin < 10) {
-          status = "low_margin";
-        }
+      let marginPercentage = 0;
+      if (revenue > 0) {
+        marginPercentage = Number(((margin / revenue) * 100).toFixed(1));
+      } else if (totalCost > 0) {
+        marginPercentage = -100;
+      }
 
-        return {
-          user_id: u.id,
-          email: u.email,
-          stripe_customer_id: u.stripe_customer_id,
-          plan: u.plan,
-          revenue,
-          total_cost: totalCost,
-          margin,
-          margin_percentage: marginPercentage,
-          status,
-          log_count: costData.log_count,
-          last_synced_at: nowIso,
-        };
-      })
-    );
+      let status: "unprofitable" | "low_margin" | "profitable" = "profitable";
+      if (margin < 0) {
+        status = "unprofitable";
+      } else if (marginPercentage < 30 || margin < 10) {
+        status = "low_margin";
+      }
 
-    // 5. Pre-sort by LOWEST MARGIN FIRST to highlight unprofitable or high-cost users
+      return {
+        user_id: u.id,
+        email: u.email,
+        lemon_squeezy_customer_id: u.lemon_squeezy_customer_id,
+        lemon_squeezy_subscription_id: u.lemon_squeezy_subscription_id,
+        plan: u.plan,
+        subscription_status: u.subscription_status,
+        revenue,
+        revenue_source: revenueSource,
+        is_revenue_estimated: isRevenueEstimated,
+        total_cost: totalCost,
+        margin,
+        margin_percentage: marginPercentage,
+        status,
+        log_count: costData.log_count,
+        last_synced_at: nowIso,
+      };
+    });
+
+    // Sort by lowest margin first to highlight unprofitable/high-cost users
     customerMargins.sort((a, b) => a.margin - b.margin);
 
-    // 6. Secondary persistence into customer_margins table if table exists
+    // ── 6. Persist to customer_margins table if it exists ──
     try {
       await supabaseAdmin.from("customer_margins").upsert(
         customerMargins.map((c) => ({
           user_id: c.user_id,
           email: c.email,
-          stripe_customer_id: c.stripe_customer_id,
+          lemon_squeezy_customer_id: c.lemon_squeezy_customer_id,
+          lemon_squeezy_subscription_id: c.lemon_squeezy_subscription_id,
           plan: c.plan,
+          subscription_status: c.subscription_status,
           revenue: c.revenue,
+          revenue_source: c.revenue_source,
+          is_revenue_estimated: c.is_revenue_estimated,
           total_cost: c.total_cost,
           margin: c.margin,
           margin_percentage: c.margin_percentage,
@@ -230,13 +294,15 @@ async function handleStripeSync(req: NextRequest) {
         success: true,
         total_customers: customerMargins.length,
         unprofitable_count: customerMargins.filter((c) => c.status === "unprofitable").length,
+        pro_price_usd: proPriceUSD,
+        pro_price_is_live: proPriceIsLive,
         synced_at: nowIso,
         customers: customerMargins,
       },
       { headers: NO_CACHE_HEADERS }
     );
   } catch (error: any) {
-    console.error("Stripe Sync Error:", error);
+    console.error("[margin-sync] Error:", error);
     return NextResponse.json(
       { error: "Internal Server Error", details: error.message || String(error) },
       { status: 500, headers: NO_CACHE_HEADERS }
