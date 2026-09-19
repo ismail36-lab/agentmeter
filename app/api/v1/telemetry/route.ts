@@ -211,11 +211,29 @@ export async function POST(req: NextRequest) {
     // 5b. Idempotency Check — return existing log response if key was already ingested
     if (idempotencyKey) {
       try {
-        const { data: existingLog } = await supabaseAdmin
-          .from("usage_logs")
-          .select("*")
-          .eq("idempotency_key", idempotencyKey)
-          .maybeSingle();
+        let existingLog: any = null;
+
+        // 1. Primary check: top-level idempotency_key column
+        try {
+          const { data: logByCol } = await supabaseAdmin
+            .from("usage_logs")
+            .select("*")
+            .eq("idempotency_key", idempotencyKey)
+            .maybeSingle();
+          if (logByCol) existingLog = logByCol;
+        } catch (e) {}
+
+        // 2. Secondary check: metadata JSONB field (metadata->>idempotency_key)
+        if (!existingLog) {
+          try {
+            const { data: logByMeta } = await supabaseAdmin
+              .from("usage_logs")
+              .select("*")
+              .eq("metadata->>idempotency_key", idempotencyKey)
+              .maybeSingle();
+            if (logByMeta) existingLog = logByMeta;
+          } catch (e) {}
+        }
 
         if (existingLog) {
           const logCost = Number(existingLog.total_cost_usd ?? existingLog.cost_usd ?? existingLog.cost ?? 0);
@@ -562,6 +580,14 @@ export async function POST(req: NextRequest) {
     const keyData = apiKeyRecord;
     const calculatedCost = roundedCost;
 
+    const metadataPayload = {
+      ...(body.metadata || {}),
+      environment: envTag,
+      agent_name: agentTag,
+      ...(sessionIdTag && { session_id: sessionIdTag }),
+      ...(idempotencyKey && { idempotency_key: idempotencyKey }),
+    };
+
     const safeInsertPayload: Record<string, any> = {
       user_id: keyData.user_id,
       model: body.model,
@@ -572,6 +598,7 @@ export async function POST(req: NextRequest) {
       latency_ms: Number(body.latency_ms || body.latency || 0),
       status_code: Number(body.status_code || 200),
       is_estimated: Boolean(body.is_estimated ?? false),
+      metadata: metadataPayload,
       ...(sessionIdTag && { session_id: sessionIdTag }),
       ...(agentTag && { agent_name: agentTag }),
       ...(idempotencyKey && { idempotency_key: idempotencyKey }),
@@ -613,11 +640,18 @@ export async function POST(req: NextRequest) {
     if (logError && idempotencyKey) {
       // Handle potential race condition or duplicate key insertion
       try {
-        const { data: existingLog } = await supabaseAdmin
-          .from("usage_logs")
-          .select("*")
-          .eq("idempotency_key", idempotencyKey)
-          .maybeSingle();
+        let existingLog: any = null;
+        try {
+          const { data: l1 } = await supabaseAdmin.from("usage_logs").select("*").eq("idempotency_key", idempotencyKey).maybeSingle();
+          existingLog = l1;
+        } catch (e) {}
+
+        if (!existingLog) {
+          try {
+            const { data: l2 } = await supabaseAdmin.from("usage_logs").select("*").eq("metadata->>idempotency_key", idempotencyKey).maybeSingle();
+            existingLog = l2;
+          } catch (e) {}
+        }
 
         if (existingLog) {
           const logCost = Number(existingLog.total_cost_usd ?? existingLog.cost_usd ?? existingLog.cost ?? 0);
@@ -650,7 +684,7 @@ export async function POST(req: NextRequest) {
         }
       } catch (e) {}
 
-      // If idempotency_key column is not present in table schema, fallback to inserting without it
+      // If idempotency_key column is not present in table schema, fallback to inserting without top-level field (metadata still holds idempotency_key)
       if (logError.message?.includes("idempotency_key")) {
         delete safeInsertPayload.idempotency_key;
         const { data: retryData, error: retryError } = await supabaseAdmin
