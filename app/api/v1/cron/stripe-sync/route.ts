@@ -105,12 +105,25 @@ async function handleMarginSync(req: NextRequest) {
     }
 
     // ── 2. Fetch user profiles from public.profiles (Lemon Squeezy as source of truth) ──
-    const { data: profiles, error: profileError } = await supabaseAdmin
-      .from("profiles")
-      .select("id, email, plan, subscription_status, lemon_squeezy_customer_id, lemon_squeezy_subscription_id");
+    const PAGE_SIZE = 1000;
+    let profiles: any[] = [];
+    let profileFrom = 0;
 
-    if (profileError) {
-      console.warn("[margin-sync] Profile fetch notice:", profileError.message);
+    while (true) {
+      const { data: pageData, error: pageErr } = await supabaseAdmin
+        .from("profiles")
+        .select("id, email, plan, subscription_status, lemon_squeezy_customer_id, lemon_squeezy_subscription_id")
+        .range(profileFrom, profileFrom + PAGE_SIZE - 1);
+
+      if (pageErr) {
+        console.warn("[margin-sync] Profile fetch notice:", pageErr.message);
+        break;
+      }
+
+      if (!pageData || pageData.length === 0) break;
+      profiles.push(...pageData);
+      if (pageData.length < PAGE_SIZE) break;
+      profileFrom += PAGE_SIZE;
     }
 
     // ── 3. Fallback: list auth users if profiles table is empty ──
@@ -150,27 +163,37 @@ async function handleMarginSync(req: NextRequest) {
       }
     }
 
-    // ── 4. Aggregate LLM cost and request count per user from usage_logs ──
-    const { data: logs, error: logsError } = await supabaseAdmin
-      .from("usage_logs")
-      .select("user_id, total_cost_usd, cost");
-
-    if (logsError) {
-      console.warn("[margin-sync] usage_logs fetch notice:", logsError.message);
-    }
-
+    // ── 4. Aggregate LLM cost and request count per user from usage_logs (paginated) ──
     const userCostMap: Record<string, { total_cost: number; log_count: number }> = {};
+    let logsFrom = 0;
 
-    (logs || []).forEach((log: any) => {
-      const uid = String(log.user_id || "orphan");
-      const cost = Number(log.total_cost_usd ?? log.cost ?? 0);
+    while (true) {
+      const { data: logsPage, error: logsError } = await supabaseAdmin
+        .from("usage_logs")
+        .select("user_id, total_cost_usd, cost")
+        .range(logsFrom, logsFrom + PAGE_SIZE - 1);
 
-      if (!userCostMap[uid]) {
-        userCostMap[uid] = { total_cost: 0, log_count: 0 };
+      if (logsError) {
+        console.warn("[margin-sync] usage_logs fetch notice:", logsError.message);
+        break;
       }
-      userCostMap[uid].total_cost += isNaN(cost) ? 0 : cost;
-      userCostMap[uid].log_count += 1;
-    });
+
+      if (!logsPage || logsPage.length === 0) break;
+
+      logsPage.forEach((log: any) => {
+        const uid = String(log.user_id || "orphan");
+        const cost = Number(log.total_cost_usd ?? log.cost ?? 0);
+
+        if (!userCostMap[uid]) {
+          userCostMap[uid] = { total_cost: 0, log_count: 0 };
+        }
+        userCostMap[uid].total_cost += isNaN(cost) ? 0 : cost;
+        userCostMap[uid].log_count += 1;
+      });
+
+      if (logsPage.length < PAGE_SIZE) break;
+      logsFrom += PAGE_SIZE;
+    }
 
     // Ensure all users in usersList exist in userCostMap
     usersList.forEach((u) => {

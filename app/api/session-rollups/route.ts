@@ -35,12 +35,30 @@ export async function GET(req: NextRequest) {
 
   try {
     // 1. Primary lookup: Query Postgres view/table `session_cost_rollup` strictly scoped to user.id
-    const { data: viewRows, error: viewError } = await supabaseAdmin
-      .from("session_cost_rollup")
-      .select("*")
-      .eq("user_id", user.id);
+    const PAGE_SIZE = 1000;
+    let viewRows: any[] = [];
+    let viewFrom = 0;
+    let hasViewError = false;
 
-    if (!viewError && viewRows && viewRows.length > 0) {
+    while (true) {
+      const { data: viewPage, error: viewError } = await supabaseAdmin
+        .from("session_cost_rollup")
+        .select("*")
+        .eq("user_id", user.id)
+        .range(viewFrom, viewFrom + PAGE_SIZE - 1);
+
+      if (viewError) {
+        hasViewError = true;
+        break;
+      }
+      if (!viewPage || viewPage.length === 0) break;
+
+      viewRows.push(...viewPage);
+      if (viewPage.length < PAGE_SIZE) break;
+      viewFrom += PAGE_SIZE;
+    }
+
+    if (!hasViewError && viewRows.length > 0) {
       const userViewRows = viewRows.filter((row: any) => {
         if (row.user_id !== user.id) return false;
         const sid = String(row.session_id || "").trim();
@@ -79,27 +97,51 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 2. Secondary fallback: Query usage_logs strictly scoped to user.id
-    const { data: logs, error: logsError } = await supabaseAdmin
-      .from("usage_logs")
-      .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: true });
+    // 2. Secondary fallback: Query usage_logs strictly scoped to user.id (paginated)
+    let logs: any[] = [];
+    let logsFrom = 0;
 
-    if (logsError) {
-      console.warn("session-rollups usage_logs query notice:", logsError.message);
-    }
-
-    let allLogs = logs || [];
-
-    // Fallback check to telemetry_logs strictly scoped to user.id if usage_logs is empty
-    if (allLogs.length === 0) {
-      const { data: tLogs } = await supabaseAdmin
-        .from("telemetry_logs")
+    while (true) {
+      const { data: logsPage, error: logsError } = await supabaseAdmin
+        .from("usage_logs")
         .select("*")
         .eq("user_id", user.id)
-        .order("created_at", { ascending: true });
-      if (tLogs && tLogs.length > 0) {
+        .order("created_at", { ascending: true })
+        .range(logsFrom, logsFrom + PAGE_SIZE - 1);
+
+      if (logsError) {
+        console.warn("session-rollups usage_logs query notice:", logsError.message);
+        break;
+      }
+
+      if (!logsPage || logsPage.length === 0) break;
+      logs.push(...logsPage);
+      if (logsPage.length < PAGE_SIZE) break;
+      logsFrom += PAGE_SIZE;
+    }
+
+    let allLogs = logs;
+
+    // Fallback check to telemetry_logs strictly scoped to user.id if usage_logs is empty (paginated)
+    if (allLogs.length === 0) {
+      const tLogs: any[] = [];
+      let tLogsFrom = 0;
+
+      while (true) {
+        const { data: tLogsPage, error: tLogsError } = await supabaseAdmin
+          .from("telemetry_logs")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: true })
+          .range(tLogsFrom, tLogsFrom + PAGE_SIZE - 1);
+
+        if (tLogsError || !tLogsPage || tLogsPage.length === 0) break;
+        tLogs.push(...tLogsPage);
+        if (tLogsPage.length < PAGE_SIZE) break;
+        tLogsFrom += PAGE_SIZE;
+      }
+
+      if (tLogs.length > 0) {
         allLogs = tLogs;
       }
     }
