@@ -14,6 +14,10 @@ import {
   ShieldCheck,
   CreditCard,
   User,
+  ArrowRight,
+  Key,
+  Send,
+  Zap,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -29,6 +33,93 @@ export interface CustomerMarginItem {
   status: "unprofitable" | "low_margin" | "profitable";
   log_count: number;
   last_synced_at: string;
+}
+
+/** Rich empty state for when no customer margin data is available */
+function CustomerEmptyState({ onSyncStripe, isSyncing }: { onSyncStripe: () => void; isSyncing: boolean }) {
+  const handleScrollToTester = () => {
+    const el = document.getElementById("ingestion-api-tester-section");
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    }
+  };
+
+  return (
+    <tr>
+      <td colSpan={6} className="py-0">
+        <div className="flex flex-col items-center justify-center gap-6 px-6 py-12 text-center">
+          {/* Icon cluster */}
+          <div className="relative">
+            <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/10 border border-emerald-500/20 flex items-center justify-center">
+              <DollarSign className="h-8 w-8 text-emerald-400" />
+            </div>
+            <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+              <Zap className="h-3.5 w-3.5 text-amber-400" />
+            </div>
+          </div>
+
+          {/* Heading */}
+          <div className="space-y-1.5 max-w-sm">
+            <h3 className="text-sm font-semibold text-zinc-100 font-sans">
+              No profitability data yet
+            </h3>
+            <p className="text-xs text-zinc-500 font-sans leading-relaxed">
+              Revenue and margin data is calculated from your subscription plan and actual LLM usage costs.
+              Start ingesting telemetry or sync with your billing provider to see margins here.
+            </p>
+          </div>
+
+          {/* Steps */}
+          <div className="flex flex-col sm:flex-row items-center gap-2 text-[11px] font-mono text-zinc-500">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
+              <span className="text-emerald-400 font-bold">1</span>
+              <Send className="h-3 w-3 text-zinc-500" />
+              <span>Send telemetry events</span>
+            </div>
+            <ArrowRight className="h-3 w-3 text-zinc-700 hidden sm:block" />
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
+              <span className="text-emerald-400 font-bold">2</span>
+              <CreditCard className="h-3 w-3 text-zinc-500" />
+              <span>Sync billing data</span>
+            </div>
+            <ArrowRight className="h-3 w-3 text-zinc-700 hidden sm:block" />
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
+              <span className="text-emerald-400 font-bold">3</span>
+              <TrendingUp className="h-3 w-3 text-zinc-500" />
+              <span>View margins live</span>
+            </div>
+          </div>
+
+          {/* CTAs */}
+          <div className="flex flex-col sm:flex-row items-center gap-2.5">
+            <button
+              id="profitability-empty-sync-btn"
+              onClick={onSyncStripe}
+              disabled={isSyncing}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-semibold font-sans transition-all duration-200 shadow-md shadow-emerald-900/40 hover:shadow-emerald-700/40 hover:scale-[1.02] active:scale-[0.98]"
+            >
+              {isSyncing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" />
+              )}
+              {isSyncing ? "Syncing..." : "Sync Billing Revenue"}
+            </button>
+            <button
+              id="profitability-empty-test-event-btn"
+              onClick={handleScrollToTester}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-600 text-zinc-300 text-xs font-semibold font-sans transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+            >
+              <Send className="h-3.5 w-3.5" />
+              Send Test Event
+            </button>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
 }
 
 export function CustomerProfitability() {
@@ -244,11 +335,15 @@ export function CustomerProfitability() {
                 </td>
               </tr>
             ) : filteredCustomers.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="py-8 text-center text-zinc-500 font-mono">
-                  {searchQuery ? "No matching customers found." : "No customer margin data available."}
-                </td>
-              </tr>
+              searchQuery ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-zinc-500 font-mono">
+                    No matching customers found.
+                  </td>
+                </tr>
+              ) : (
+                <CustomerEmptyState onSyncStripe={handleSyncStripe} isSyncing={isSyncing} />
+              )
             ) : (
               filteredCustomers.map((cust) => (
                 <tr

@@ -30,6 +30,8 @@ import {
   TrendingUp,
   BookOpen,
   CreditCard,
+  ArrowRight,
+  ChevronRight,
 } from "lucide-react";
 import { UsageTrendChart } from "@/components/charts/UsageTrendChart";
 import { ModelDistributionChart } from "@/components/charts/ModelDistributionChart";
@@ -1141,8 +1143,29 @@ export default function Dashboard() {
             </div>
             <div className="space-y-3 font-mono text-xs">
               {environmentBreakdown.length === 0 ? (
-                <div className="py-6 text-center text-xs text-zinc-500 font-mono">
-                  No activity logs recorded yet
+                <div className="py-8 flex flex-col items-center gap-4 text-center">
+                  <div className="h-12 w-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center">
+                    <ShieldCheck className="h-6 w-6 text-indigo-400" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-zinc-300 font-sans">No environment data yet</p>
+                    <p className="text-[11px] text-zinc-600 font-sans max-w-[200px] leading-relaxed">
+                      Tag your API calls with an{" "}
+                      <code className="text-indigo-400 font-mono text-[10px]">environment</code>{" "}
+                      field to track cost by deployment.
+                    </p>
+                  </div>
+                  <button
+                    id="env-empty-send-test-btn"
+                    onClick={() => {
+                      const el = document.getElementById("ingestion-api-tester-section");
+                      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/80 hover:bg-indigo-500 text-white text-[11px] font-semibold font-sans transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] shadow-sm shadow-indigo-900/30"
+                  >
+                    <Send className="h-3 w-3" />
+                    Send Test Event
+                  </button>
                 </div>
               ) : (
                 environmentBreakdown.map((env) => (
@@ -1199,8 +1222,29 @@ export default function Dashboard() {
             </div>
             <div className="space-y-2.5 font-mono text-xs">
               {agentBreakdown.length === 0 ? (
-                <div className="py-6 text-center text-xs text-zinc-500 font-mono">
-                  No activity logs recorded yet
+                <div className="py-8 flex flex-col items-center gap-4 text-center">
+                  <div className="h-12 w-12 rounded-xl bg-violet-500/10 border border-violet-500/20 flex items-center justify-center">
+                    <Cpu className="h-6 w-6 text-violet-400" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-semibold text-zinc-300 font-sans">No agents tracked yet</p>
+                    <p className="text-[11px] text-zinc-600 font-sans max-w-[200px] leading-relaxed">
+                      Pass an{" "}
+                      <code className="text-violet-400 font-mono text-[10px]">agent_name</code>{" "}
+                      field in telemetry to see cost per agent.
+                    </p>
+                  </div>
+                  <button
+                    id="agent-empty-copy-curl-btn"
+                    onClick={handleCopyCurl}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-700/80 hover:bg-violet-600 text-white text-[11px] font-semibold font-sans transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] shadow-sm shadow-violet-900/30"
+                  >
+                    {copiedCurl ? (
+                      <><CheckCircle2 className="h-3 w-3 text-white" /> Copied!</>
+                    ) : (
+                      <><Copy className="h-3 w-3" /> Copy cURL Snippet</>
+                    )}
+                  </button>
                 </div>
               ) : (
                 agentBreakdown.map((agent) => {
@@ -1257,6 +1301,7 @@ export default function Dashboard() {
         <SessionRollups />
 
         {/* ── API Key Management Bento Card ─────────────────── */}
+        <div id="api-key-management-section">
         <ApiKeyManagement
           apiKeys={apiKeys}
           isLoading={isLoadingKeys}
@@ -1277,12 +1322,13 @@ export default function Dashboard() {
             }
           }}
         />
+        </div>
 
         {/* ── Playground + Table ─────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
 
           {/* API Tester */}
-          <div className="bento-card p-6 space-y-4 sm:col-span-2 lg:col-span-1 w-full border border-zinc-800/80 bg-zinc-900/90">
+          <div id="ingestion-api-tester-section" className="bento-card p-6 space-y-4 sm:col-span-2 lg:col-span-1 w-full border border-zinc-800/80 bg-zinc-900/90">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <h3 className="text-sm font-semibold text-zinc-50 flex items-center gap-2 font-sans tracking-tight">
                 <Terminal className="h-4 w-4 text-indigo-400" />
@@ -1508,8 +1554,80 @@ export default function Dashboard() {
                     </tr>
                   ) : filteredLogs.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-6 text-center text-zinc-500">
-                        No telemetry logs found. Generate an API key above and send a test payload!
+                      <td colSpan={6} className="py-0">
+                        <div className="flex flex-col items-center justify-center gap-5 px-6 py-12 text-center">
+                          {/* Icon */}
+                          <div className="relative">
+                            <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-violet-500/10 border border-indigo-500/20 flex items-center justify-center">
+                              <Activity className="h-8 w-8 text-indigo-400" />
+                            </div>
+                            <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-zinc-950 border border-zinc-800 flex items-center justify-center">
+                              <span className="block h-2 w-2 rounded-full bg-indigo-400 animate-pulse" />
+                            </div>
+                          </div>
+
+                          {/* Message */}
+                          <div className="space-y-1.5 max-w-xs">
+                            <h3 className="text-sm font-semibold text-zinc-100 font-sans">Waiting for your first event</h3>
+                            <p className="text-xs text-zinc-500 font-sans leading-relaxed">
+                              Generate an API key and send a telemetry payload. Logs appear here in real-time via Supabase Realtime.
+                            </p>
+                          </div>
+
+                          {/* Steps pill row */}
+                          <div className="flex flex-col sm:flex-row items-center gap-2 text-[11px] font-mono text-zinc-500">
+                            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
+                              <span className="text-indigo-400 font-bold">1</span>
+                              <Key className="h-3 w-3 text-zinc-500" />
+                              <span>Create API Key</span>
+                            </div>
+                            <ArrowRight className="h-3 w-3 text-zinc-700 hidden sm:block" />
+                            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
+                              <span className="text-indigo-400 font-bold">2</span>
+                              <Send className="h-3 w-3 text-zinc-500" />
+                              <span>Send Test Event</span>
+                            </div>
+                            <ArrowRight className="h-3 w-3 text-zinc-700 hidden sm:block" />
+                            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
+                              <span className="text-indigo-400 font-bold">3</span>
+                              <Activity className="h-3 w-3 text-zinc-500" />
+                              <span>Logs appear live</span>
+                            </div>
+                          </div>
+
+                          {/* CTA buttons */}
+                          <div className="flex flex-col sm:flex-row items-center gap-2.5">
+                            <button
+                              id="telemetry-empty-generate-key-btn"
+                              onClick={() => {
+                                const el = document.getElementById("api-key-management-section");
+                                if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+                              }}
+                              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold font-sans transition-all duration-200 shadow-md shadow-indigo-900/40 hover:scale-[1.02] active:scale-[0.98]"
+                            >
+                              <Key className="h-3.5 w-3.5" />
+                              Generate API Key
+                              <ChevronRight className="h-3.5 w-3.5 opacity-70" />
+                            </button>
+                            <button
+                              id="telemetry-empty-copy-curl-btn"
+                              onClick={handleCopyCurl}
+                              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-600 text-zinc-300 text-xs font-semibold font-sans transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+                            >
+                              {copiedCurl ? (
+                                <>
+                                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                                  <span className="text-emerald-400">cURL Copied!</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="h-3.5 w-3.5" />
+                                  Copy cURL Command
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        </div>
                       </td>
                     </tr>
                   ) : (

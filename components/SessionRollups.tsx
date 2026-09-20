@@ -14,6 +14,9 @@ import {
   Loader2,
   ChevronRight,
   Zap,
+  Key,
+  Terminal,
+  ArrowRight,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -46,6 +49,121 @@ function formatDuration(seconds: number): string {
   const mins = Math.floor(seconds / 60);
   const remSecs = (seconds % 60).toFixed(0);
   return `${mins}m ${remSecs}s`;
+}
+
+const SESSION_SNIPPET = `import meterix
+
+# Initialize with your API key
+meter = meterix.Client(api_key="mx_live_your_key_here")
+
+# Wrap multi-call agents with session tracking
+with meter.session("checkout-agent-001") as session:
+    result1 = openai.chat.completions.create(
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "Step 1"}]
+    )
+    session.log(result1)
+
+    result2 = openai.chat.completions.create(
+        model="gpt-4o", 
+        messages=[{"role": "user", "content": "Step 2"}]
+    )
+    session.log(result2)
+# Session automatically rolled up in dashboard ✓`;
+
+/** Rich empty state for when no session data is available */
+function SessionEmptyState({ onScrollToKeys }: { onScrollToKeys: () => void }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopySnippet = () => {
+    navigator.clipboard.writeText(SESSION_SNIPPET);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
+
+  return (
+    <tr>
+      <td colSpan={6} className="py-0">
+        <div className="flex flex-col items-center justify-center gap-6 px-6 py-12 text-center">
+          {/* Icon cluster */}
+          <div className="relative">
+            <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-indigo-500/20 to-violet-500/10 border border-indigo-500/20 flex items-center justify-center">
+              <Layers className="h-8 w-8 text-indigo-400" />
+            </div>
+            <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+              <Zap className="h-3.5 w-3.5 text-amber-400" />
+            </div>
+          </div>
+
+          {/* Heading */}
+          <div className="space-y-1.5 max-w-sm">
+            <h3 className="text-sm font-semibold text-zinc-100 font-sans">
+              No agent sessions recorded yet
+            </h3>
+            <p className="text-xs text-zinc-500 font-sans leading-relaxed">
+              Session rollups aggregate cost, latency, and model usage across
+              multi-step agent tasks. Start logging with{" "}
+              <code className="text-indigo-400 bg-indigo-950/40 px-1 py-0.5 rounded text-[10px] font-mono border border-indigo-900/50">
+                meter.session(id)
+              </code>{" "}
+              to see data here.
+            </p>
+          </div>
+
+          {/* Steps */}
+          <div className="flex flex-col sm:flex-row items-center gap-2 text-[11px] font-mono text-zinc-500">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
+              <span className="text-indigo-400 font-bold">1</span>
+              <Key className="h-3 w-3 text-zinc-500" />
+              <span>Get API Key</span>
+            </div>
+            <ArrowRight className="h-3 w-3 text-zinc-700 hidden sm:block" />
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
+              <span className="text-indigo-400 font-bold">2</span>
+              <Terminal className="h-3 w-3 text-zinc-500" />
+              <span>Add session() wrapping</span>
+            </div>
+            <ArrowRight className="h-3 w-3 text-zinc-700 hidden sm:block" />
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800">
+              <span className="text-indigo-400 font-bold">3</span>
+              <Activity className="h-3 w-3 text-zinc-500" />
+              <span>Sessions appear live</span>
+            </div>
+          </div>
+
+          {/* CTAs */}
+          <div className="flex flex-col sm:flex-row items-center gap-2.5">
+            <button
+              id="session-empty-generate-key-btn"
+              onClick={onScrollToKeys}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold font-sans transition-all duration-200 shadow-md shadow-indigo-900/40 hover:shadow-indigo-700/40 hover:scale-[1.02] active:scale-[0.98]"
+            >
+              <Key className="h-3.5 w-3.5" />
+              Generate API Key
+              <ChevronRight className="h-3.5 w-3.5 opacity-70" />
+            </button>
+            <button
+              id="session-empty-copy-snippet-btn"
+              onClick={handleCopySnippet}
+              className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-600 text-zinc-300 text-xs font-semibold font-sans transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+            >
+              {copied ? (
+                <>
+                  <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                  <span className="text-emerald-400">Snippet Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy Python Snippet
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
 }
 
 export function SessionRollups() {
@@ -84,6 +202,15 @@ export function SessionRollups() {
     navigator.clipboard.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleScrollToKeys = () => {
+    const el = document.getElementById("api-key-management-section");
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    }
   };
 
   // Filtered Sessions
@@ -249,11 +376,15 @@ export function SessionRollups() {
                 </td>
               </tr>
             ) : filteredSessions.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="py-8 text-center text-zinc-500 font-mono">
-                  {searchQuery ? "No matching sessions found." : "No agent session rollups recorded yet. Use meter.session(sessionId) in your code to log session tasks!"}
-                </td>
-              </tr>
+              searchQuery ? (
+                <tr>
+                  <td colSpan={6} className="py-8 text-center text-zinc-500 font-mono">
+                    No matching sessions found.
+                  </td>
+                </tr>
+              ) : (
+                <SessionEmptyState onScrollToKeys={handleScrollToKeys} />
+              )
             ) : (
               filteredSessions.map((session) => (
                 <tr key={session.session_id} className="hover:bg-zinc-900/50 transition-colors">
