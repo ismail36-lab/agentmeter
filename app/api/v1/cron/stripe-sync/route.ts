@@ -19,7 +19,7 @@ export interface CustomerMarginItem {
   total_cost: number;
   margin: number;
   margin_percentage: number;
-  status: "unprofitable" | "low_margin" | "profitable";
+  status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account";
   log_count: number;
   last_synced_at: string;
 }
@@ -295,8 +295,10 @@ async function syncSingleCustomer(
       marginPercentage = -100;
     }
 
-    let status: "unprofitable" | "low_margin" | "profitable" = "profitable";
-    if (margin < 0) {
+    let status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account" = "profitable";
+    if (revenue === 0 && totalCost === 0) {
+      status = "no_data";
+    } else if (margin < 0) {
       status = "unprofitable";
     } else if (marginPercentage < 30 || margin < 10) {
       status = "low_margin";
@@ -353,7 +355,7 @@ async function syncSingleCustomer(
       total_cost: totalCost,
       margin: -totalCost,
       margin_percentage: totalCost > 0 ? -100 : 0,
-      status: totalCost > 0 ? "unprofitable" : "profitable",
+      status: totalCost > 0 ? "unprofitable" : "no_data",
       log_count: costData.log_count,
       last_synced_at: nowIso,
     };

@@ -18,6 +18,7 @@ import {
   Key,
   Send,
   Zap,
+  HelpCircle,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -30,7 +31,7 @@ export interface CustomerMarginItem {
   total_cost: number;
   margin: number;
   margin_percentage: number;
-  status: "unprofitable" | "low_margin" | "profitable";
+  status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account";
   log_count: number;
   last_synced_at: string;
 }
@@ -410,7 +411,12 @@ export function CustomerProfitability() {
 
                   {/* Status Badge */}
                   <td className="py-3 px-4 whitespace-nowrap text-center">
-                    {cust.status === "unprofitable" ? (
+                    {cust.status === "no_data" || cust.status === "new_account" || (cust.revenue === 0 && cust.total_cost === 0) ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-zinc-500/15 text-zinc-400 border border-zinc-500/30 font-sans">
+                        <HelpCircle className="h-3 w-3 text-zinc-400" />
+                        No Data Yet
+                      </span>
+                    ) : cust.status === "unprofitable" ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-rose-500/15 text-rose-400 border border-rose-500/30 font-sans">
                         <AlertCircle className="h-3 w-3" />
                         Unprofitable
