@@ -70,41 +70,21 @@ export function DashboardHeader({ activeKeyCount = 0 }: DashboardHeaderProps) {
 
     return (
       <span className="inline-flex flex-wrap items-center gap-1.5 align-baseline">
-        {topModels.map((model, idx) => {
+        {topModels.map((model) => {
           const colorClass = getModelTagColor(model);
-
           return (
-            <React.Fragment key={`${model}-${idx}`}>
-              <code className={`px-1.5 py-0.5 rounded border font-mono text-xs ${colorClass}`}>
-                {model}
-              </code>
-
-              {/* Formatting without 'and more' */}
-              {!hasMore && topModels.length === 2 && idx === 0 && (
-                <span className="text-zinc-400">and</span>
-              )}
-              {!hasMore && topModels.length > 2 && idx < topModels.length - 2 && (
-                <span className="text-zinc-400">,</span>
-              )}
-              {!hasMore && topModels.length > 2 && idx === topModels.length - 2 && (
-                <span className="text-zinc-400">, and</span>
-              )}
-
-              {/* Formatting with 'and more' */}
-              {hasMore && idx < topModels.length - 1 && (
-                <span className="text-zinc-400">,</span>
-              )}
-            </React.Fragment>
+            <code
+              key={model}
+              className={`px-1.5 py-0.5 rounded border font-mono text-xs ${colorClass}`}
+            >
+              {model}
+            </code>
           );
         })}
-
         {hasMore && (
-          <>
-            <span className="text-zinc-400">, and</span>
-            <span className="text-indigo-400 font-medium font-mono text-xs px-1.5 py-0.5 rounded border border-indigo-900/60 bg-indigo-950/40">
-              more
-            </span>
-          </>
+          <span className="text-zinc-400 text-xs font-sans">
+            and more.
+          </span>
         )}
       </span>
     );
