@@ -40,6 +40,7 @@ import { SessionRollups } from "@/components/SessionRollups";
 import { CustomerProfitability } from "@/components/CustomerProfitability";
 import { WebhookManagement } from "@/components/WebhookManagement";
 import { ProjectRetentionSettings } from "@/components/ProjectRetentionSettings";
+import { DashboardHeader } from "@/components/DashboardHeader";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -854,35 +855,7 @@ export default function Dashboard() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6 overflow-x-hidden">
 
         {/* ── Header Banner ──────────────────────────────────── */}
-        <div className="bento-card p-6 flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between border border-zinc-800/80 bg-zinc-900/90">
-          <div>
-            <h1 className="text-xl font-semibold text-zinc-50 flex items-center gap-2 font-sans tracking-tight">
-              LLM Telemetry &amp; Cost Analytics
-              <ShieldCheck className="h-4.5 w-4.5 text-indigo-400" />
-            </h1>
-            <p className="text-sm text-zinc-400 mt-1 max-w-2xl">
-              Real-time usage metering, token tracking, and precise cost calculation for{" "}
-              <code className="text-indigo-400 bg-indigo-950/40 px-1.5 py-0.5 rounded border border-indigo-900/60 font-mono text-xs">
-                gpt-4o
-              </code>
-              ,{" "}
-              <code className="text-sky-400 bg-sky-950/40 px-1.5 py-0.5 rounded border border-sky-900/60 font-mono text-xs">
-                gpt-4o-mini
-              </code>
-              , and{" "}
-              <code className="text-violet-400 bg-violet-950/40 px-1.5 py-0.5 rounded border border-violet-900/60 font-mono text-xs">
-                claude-3-5-sonnet
-              </code>
-              .
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 font-mono text-xs text-zinc-400 shrink-0">
-            <span className="px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400">
-              {apiKeys.length} Active {apiKeys.length === 1 ? "Key" : "Keys"}
-            </span>
-          </div>
-        </div>
+        <DashboardHeader activeKeyCount={apiKeys.length} />
 
         {/* ── Unified Subscription & Usage Card ──────────────── */}
         <div className="bento-card p-6 space-y-4">
