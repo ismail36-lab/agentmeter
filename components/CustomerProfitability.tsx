@@ -21,6 +21,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useToast } from "@/components/ui/Toast";
 
 export interface CustomerMarginItem {
   user_id: string;
@@ -128,6 +129,7 @@ export function CustomerProfitability() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const toast = useToast();
 
   const fetchCustomerMargins = async () => {
     setIsLoading(true);
@@ -143,9 +145,16 @@ export function CustomerProfitability() {
         if (data.customers) {
           setCustomers(data.customers);
         }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.error || `HTTP ${res.status}: Failed to load customer profitability.`;
+        console.error("Could not fetch customer profitability:", errMsg);
+        toast.error(errMsg, "Profitability Data Error");
       }
-    } catch (err) {
-      console.warn("Could not fetch customer profitability:", err);
+    } catch (err: any) {
+      const message = err?.message || "Could not fetch customer profitability. Please check your network connection.";
+      console.error("Could not fetch customer profitability:", err);
+      toast.error(message, "Network Error");
     } finally {
       setIsLoading(false);
     }
@@ -160,9 +169,17 @@ export function CustomerProfitability() {
         if (data.customers) {
           setCustomers(data.customers);
         }
+        toast.success("Stripe revenue & margins synced successfully.", "Sync Complete");
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.error || errData.details || "Failed to sync Stripe revenue. Please check your network or API keys.";
+        console.error("Error syncing Stripe revenue:", errMsg);
+        toast.error(errMsg, "Stripe Sync Failed");
       }
-    } catch (err) {
-      console.warn("Error syncing Stripe revenue:", err);
+    } catch (err: any) {
+      const message = err?.message || "Failed to sync Stripe revenue. Please check your network or API keys.";
+      console.error("Error syncing Stripe revenue:", err);
+      toast.error(message, "Stripe Sync Failed");
     } finally {
       setIsSyncing(false);
     }

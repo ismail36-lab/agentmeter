@@ -20,6 +20,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useToast } from "@/components/ui/Toast";
 
 export interface SessionRollupItem {
   session_id: string;
@@ -172,6 +173,7 @@ export function SessionRollups() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const toast = useToast();
 
   const fetchSessionRollups = async () => {
     setIsLoading(true);
@@ -187,9 +189,16 @@ export function SessionRollups() {
         if (data.sessions) {
           setSessions(data.sessions);
         }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.error || `HTTP ${res.status}: Failed to fetch agent session rollups.`;
+        console.error("Could not fetch session rollups:", errMsg);
+        toast.error(errMsg, "Session Rollups Error");
       }
-    } catch (err) {
-      console.warn("Could not fetch session rollups:", err);
+    } catch (err: any) {
+      const message = err?.message || "Failed to load agent session rollups. Please check your network connection.";
+      console.error("Could not fetch session rollups:", err);
+      toast.error(message, "Network Error");
     } finally {
       setIsLoading(false);
     }
