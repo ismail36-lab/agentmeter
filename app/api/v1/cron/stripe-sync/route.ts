@@ -216,74 +216,157 @@ async function handleMarginSync(req: NextRequest) {
 
     const nowIso = new Date().toISOString();
 
-    // ── 5. Compute revenue and margins for each customer ──
-    const customerMargins: CustomerMarginItem[] = usersList.map((u) => {
-      let revenue = 0;
-      let revenueSource: RevenueSource = "free";
-      let isRevenueEstimated = false;
+/**
+ * Processes an array of items in controlled concurrent batches.
+ * Limits concurrency to batchSize (e.g., 5-10 requests at a time) to prevent fan-out,
+ * socket exhaustion, database pool exhaustion, and API rate-limiting (429).
+ */
+async function processInBatches<T, R>(
+  items: T[],
+  batchSize: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map((item) => fn(item)));
+    results.push(...batchResults);
+  }
+  return results;
+}
 
-      const isActivePro =
-        u.plan === "pro" &&
-        (u.subscription_status === "active" || u.subscription_status === "on_trial");
+/**
+ * Processes a single customer margin calculation with per-customer error isolation.
+ * Catches HTTP 429 (rate-limiting) and temporary Stripe/Lemon Squeezy network errors gracefully so that one failed
+ * API call never crashes the entire cron job run.
+ */
+async function syncSingleCustomer(
+  u: {
+    id: string;
+    email: string;
+    plan: string;
+    subscription_status: string | null;
+    lemon_squeezy_customer_id: string | null;
+    lemon_squeezy_subscription_id: string | null;
+  },
+  proPriceUSD: number,
+  proPriceIsLive: boolean,
+  userCostMap: Record<string, { total_cost: number; log_count: number }>,
+  nowIso: string
+): Promise<CustomerMarginItem> {
+  try {
+    let revenue = 0;
+    let revenueSource: RevenueSource = "free";
+    let isRevenueEstimated = false;
 
-      const isInactivePro =
-        u.plan === "pro" && !isActivePro;
+    const isActivePro =
+      u.plan === "pro" &&
+      (u.subscription_status === "active" || u.subscription_status === "on_trial");
 
-      if (isActivePro) {
-        // Active/on-trial Pro subscriber — confirmed revenue from Lemon Squeezy pricing
-        revenue = proPriceUSD;
-        revenueSource = "lemonsqueezy_active";
-        // Revenue is only truly confirmed if the LS API returned a live price;
-        // if we fell back to the env var, mark as estimated.
-        isRevenueEstimated = !proPriceIsLive;
-      } else if (isInactivePro) {
-        // Cancelled/past-due Pro — subscription is no longer active, use price as estimate
-        revenue = proPriceUSD;
-        revenueSource = "plan_estimate";
-        isRevenueEstimated = true;
-      } else {
-        // Free tier — confirmed zero revenue
-        revenue = 0;
-        revenueSource = "free";
-        isRevenueEstimated = false;
-      }
+    const isInactivePro = u.plan === "pro" && !isActivePro;
 
-      const costData = userCostMap[u.id] || { total_cost: 0, log_count: 0 };
-      const totalCost = Number(costData.total_cost.toFixed(4));
-      const margin = Number((revenue - totalCost).toFixed(4));
+    if (isActivePro) {
+      // Active/on-trial Pro subscriber — confirmed revenue from Lemon Squeezy pricing
+      revenue = proPriceUSD;
+      revenueSource = "lemonsqueezy_active";
+      // Revenue is only truly confirmed if the API returned a live price;
+      // if we fell back to the env var, mark as estimated.
+      isRevenueEstimated = !proPriceIsLive;
+    } else if (isInactivePro) {
+      // Cancelled/past-due Pro — subscription is no longer active, use price as estimate
+      revenue = proPriceUSD;
+      revenueSource = "plan_estimate";
+      isRevenueEstimated = true;
+    } else {
+      // Free tier — confirmed zero revenue
+      revenue = 0;
+      revenueSource = "free";
+      isRevenueEstimated = false;
+    }
 
-      let marginPercentage = 0;
-      if (revenue > 0) {
-        marginPercentage = Number(((margin / revenue) * 100).toFixed(1));
-      } else if (totalCost > 0) {
-        marginPercentage = -100;
-      }
+    const costData = userCostMap[u.id] || { total_cost: 0, log_count: 0 };
+    const totalCost = Number(costData.total_cost.toFixed(4));
+    const margin = Number((revenue - totalCost).toFixed(4));
 
-      let status: "unprofitable" | "low_margin" | "profitable" = "profitable";
-      if (margin < 0) {
-        status = "unprofitable";
-      } else if (marginPercentage < 30 || margin < 10) {
-        status = "low_margin";
-      }
+    let marginPercentage = 0;
+    if (revenue > 0) {
+      marginPercentage = Number(((margin / revenue) * 100).toFixed(1));
+    } else if (totalCost > 0) {
+      marginPercentage = -100;
+    }
 
-      return {
-        user_id: u.id,
-        email: u.email,
-        lemon_squeezy_customer_id: u.lemon_squeezy_customer_id,
-        lemon_squeezy_subscription_id: u.lemon_squeezy_subscription_id,
-        plan: u.plan,
-        subscription_status: u.subscription_status,
-        revenue,
-        revenue_source: revenueSource,
-        is_revenue_estimated: isRevenueEstimated,
-        total_cost: totalCost,
-        margin,
-        margin_percentage: marginPercentage,
-        status,
-        log_count: costData.log_count,
-        last_synced_at: nowIso,
-      };
-    });
+    let status: "unprofitable" | "low_margin" | "profitable" = "profitable";
+    if (margin < 0) {
+      status = "unprofitable";
+    } else if (marginPercentage < 30 || margin < 10) {
+      status = "low_margin";
+    }
+
+    return {
+      user_id: u.id,
+      email: u.email,
+      lemon_squeezy_customer_id: u.lemon_squeezy_customer_id,
+      lemon_squeezy_subscription_id: u.lemon_squeezy_subscription_id,
+      plan: u.plan,
+      subscription_status: u.subscription_status,
+      revenue,
+      revenue_source: revenueSource,
+      is_revenue_estimated: isRevenueEstimated,
+      total_cost: totalCost,
+      margin,
+      margin_percentage: marginPercentage,
+      status,
+      log_count: costData.log_count,
+      last_synced_at: nowIso,
+    };
+  } catch (err: any) {
+    const isRateLimit =
+      err?.status === 429 ||
+      err?.response?.status === 429 ||
+      String(err).includes("429");
+    if (isRateLimit) {
+      console.warn(
+        `[stripe-sync] Rate limit (429) encountered while syncing customer ${u.id}. Falling back to default metrics.`,
+        err
+      );
+    } else {
+      console.warn(
+        `[stripe-sync] Network or API error syncing customer ${u.id}:`,
+        err
+      );
+    }
+
+    // Safe per-customer fallback so one failed API call does not crash the cron job
+    const costData = userCostMap[u.id] || { total_cost: 0, log_count: 0 };
+    const totalCost = Number(costData.total_cost.toFixed(4));
+
+    return {
+      user_id: u.id,
+      email: u.email,
+      lemon_squeezy_customer_id: u.lemon_squeezy_customer_id,
+      lemon_squeezy_subscription_id: u.lemon_squeezy_subscription_id,
+      plan: u.plan || "free",
+      subscription_status: u.subscription_status || null,
+      revenue: 0,
+      revenue_source: "free",
+      is_revenue_estimated: true,
+      total_cost: totalCost,
+      margin: -totalCost,
+      margin_percentage: totalCost > 0 ? -100 : 0,
+      status: totalCost > 0 ? "unprofitable" : "profitable",
+      log_count: costData.log_count,
+      last_synced_at: nowIso,
+    };
+  }
+}
+
+    // ── 5. Compute revenue and margins for each customer in controlled batches ──
+    const BATCH_SIZE = 10;
+    const customerMargins: CustomerMarginItem[] = await processInBatches(
+      usersList,
+      BATCH_SIZE,
+      (u) => syncSingleCustomer(u, proPriceUSD, proPriceIsLive, userCostMap, nowIso)
+    );
 
     // Sort by lowest margin first to highlight unprofitable/high-cost users
     customerMargins.sort((a, b) => a.margin - b.margin);
