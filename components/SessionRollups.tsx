@@ -17,6 +17,7 @@ import {
   Key,
   Terminal,
   ArrowRight,
+  XCircle,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 
@@ -378,8 +379,27 @@ export function SessionRollups() {
             ) : filteredSessions.length === 0 ? (
               searchQuery ? (
                 <tr>
-                  <td colSpan={6} className="py-8 text-center text-zinc-500 font-mono">
-                    No matching sessions found.
+                  <td colSpan={6} className="py-0">
+                    <div className="flex flex-col items-center justify-center gap-3 px-6 py-12 text-center">
+                      <div className="h-12 w-12 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center">
+                        <Search className="h-5 w-5 text-zinc-500" />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-semibold text-zinc-200 font-sans">
+                          No matching sessions found
+                        </h4>
+                        <p className="text-xs text-zinc-500 font-sans">
+                          No sessions found matching your search criteria.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setSearchQuery("")}
+                        className="mt-1 inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-600 text-zinc-300 hover:text-zinc-100 text-xs font-semibold font-sans transition-all duration-200"
+                      >
+                        <XCircle className="h-3.5 w-3.5 text-zinc-400" />
+                        Clear Search
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ) : (
