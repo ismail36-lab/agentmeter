@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { ToastProvider } from "@/components/ui/Toast";
 
 export const metadata: Metadata = {
   title: "Meterix - LLM Telemetry & Cost Analytics",
@@ -14,7 +15,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="dark w-full max-w-full overflow-x-hidden">
       <body className="bg-[#090d16] text-slate-100 antialiased min-h-screen w-full max-w-full overflow-x-hidden">
-        {children}
+        <ToastProvider>{children}</ToastProvider>
       </body>
     </html>
   );
