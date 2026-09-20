@@ -83,7 +83,7 @@ export function DashboardHeader({ activeKeyCount = 0 }: DashboardHeaderProps) {
         })}
         {hasMore && (
           <span className="text-zinc-400 text-xs font-sans">
-            and more.
+            and more
           </span>
         )}
       </span>
