@@ -29,10 +29,15 @@ export function DashboardHeader({ activeKeyCount = 0 }: DashboardHeaderProps) {
         const res = await fetch("/api/models/supported", { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        if (isMounted && data.models && Array.isArray(data.models) && data.models.length > 0) {
-          setSupportedModels(data.models);
-          if (data.formatted) {
-            setFormattedText(data.formatted);
+        if (isMounted && data.models && Array.isArray(data.models)) {
+          const validList = data.models.filter(
+            (m: any) => typeof m === "string" && m.trim().length > 0
+          );
+          if (validList.length > 0) {
+            setSupportedModels(validList);
+            if (data.formatted) {
+              setFormattedText(data.formatted);
+            }
           }
         }
       } catch (err) {
@@ -49,37 +54,56 @@ export function DashboardHeader({ activeKeyCount = 0 }: DashboardHeaderProps) {
     };
   }, []);
 
-  // Helper to render inline model badges nicely
+  // Helper to render inline model badges cleanly
   const renderModelList = () => {
-    if (isLoading || supportedModels.length === 0) {
+    const validModels = (supportedModels || []).filter(
+      (m) => typeof m === "string" && m.trim().length > 0
+    );
+
+    if (isLoading || validModels.length === 0) {
       return <span className="text-zinc-300 font-medium">{formattedText}</span>;
     }
 
-    const topModels = supportedModels.slice(0, 3);
-    const hasMore = supportedModels.length > 3;
+    const maxDisplay = 3;
+    const topModels = validModels.slice(0, maxDisplay);
+    const hasMore = validModels.length > maxDisplay;
 
     return (
       <span className="inline-flex flex-wrap items-center gap-1.5 align-baseline">
         {topModels.map((model, idx) => {
           const colorClass = getModelTagColor(model);
-          const isLast = idx === topModels.length - 1 && !hasMore;
-          const isSecondToLast = idx === topModels.length - 2 && !hasMore;
 
           return (
-            <React.Fragment key={model}>
+            <React.Fragment key={`${model}-${idx}`}>
               <code className={`px-1.5 py-0.5 rounded border font-mono text-xs ${colorClass}`}>
                 {model}
               </code>
-              {topModels.length === 2 && idx === 0 && <span className="text-zinc-400">and</span>}
-              {topModels.length > 2 && isSecondToLast && <span className="text-zinc-400">, and</span>}
-              {topModels.length > 2 && !isLast && !isSecondToLast && <span className="text-zinc-400">,</span>}
+
+              {/* Formatting without 'and more' */}
+              {!hasMore && topModels.length === 2 && idx === 0 && (
+                <span className="text-zinc-400">and</span>
+              )}
+              {!hasMore && topModels.length > 2 && idx < topModels.length - 2 && (
+                <span className="text-zinc-400">,</span>
+              )}
+              {!hasMore && topModels.length > 2 && idx === topModels.length - 2 && (
+                <span className="text-zinc-400">, and</span>
+              )}
+
+              {/* Formatting with 'and more' */}
+              {hasMore && idx < topModels.length - 1 && (
+                <span className="text-zinc-400">,</span>
+              )}
             </React.Fragment>
           );
         })}
+
         {hasMore && (
           <>
             <span className="text-zinc-400">, and</span>
-            <span className="text-indigo-400 font-medium">more</span>
+            <span className="text-indigo-400 font-medium font-mono text-xs px-1.5 py-0.5 rounded border border-indigo-900/60 bg-indigo-950/40">
+              more
+            </span>
           </>
         )}
       </span>
