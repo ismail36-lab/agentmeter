@@ -252,65 +252,118 @@ export function CustomerProfitability() {
       </div>
 
       {/* ── Summary Cards Grid ─────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
-        <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="font-mono uppercase tracking-wider">Total Customer Revenue</span>
-            <div className="p-1.5 rounded-lg bg-zinc-900 text-indigo-400">
-              <CreditCard className="h-4 w-4" />
+      {(() => {
+        const hasData = customers.length > 0;
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
+            {/* Total Customer Revenue */}
+            <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span className="font-mono uppercase tracking-wider">Total Customer Revenue</span>
+                <div className={`p-1.5 rounded-lg bg-zinc-900 ${hasData ? "text-indigo-400" : "text-zinc-600"}`}>
+                  <CreditCard className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-3 flex items-baseline justify-between">
+                {hasData ? (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-100">${totals.totalRev.toFixed(2)}</span>
+                    <span className="text-[11px] font-mono text-indigo-400">Stripe USD</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-600">--</span>
+                    <span className="text-[11px] font-mono text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                      No Data
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="mt-3 flex items-baseline justify-between">
-            <span className="text-2xl font-bold font-mono text-zinc-100">${totals.totalRev.toFixed(2)}</span>
-            <span className="text-[11px] font-mono text-indigo-400">Stripe USD</span>
-          </div>
-        </div>
 
-        <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="font-mono uppercase tracking-wider">LLM Infra Cost</span>
-            <div className="p-1.5 rounded-lg bg-zinc-900 text-rose-400">
-              <TrendingDown className="h-4 w-4" />
+            {/* LLM Infra Cost */}
+            <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span className="font-mono uppercase tracking-wider">LLM Infra Cost</span>
+                <div className={`p-1.5 rounded-lg bg-zinc-900 ${hasData ? "text-rose-400" : "text-zinc-600"}`}>
+                  <TrendingDown className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-3 flex items-baseline justify-between">
+                {hasData ? (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-100">${totals.totalCost.toFixed(2)}</span>
+                    <span className="text-[11px] font-mono text-rose-400">Usage Cost</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-600">--</span>
+                    <span className="text-[11px] font-mono text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                      No Data
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="mt-3 flex items-baseline justify-between">
-            <span className="text-2xl font-bold font-mono text-zinc-100">${totals.totalCost.toFixed(2)}</span>
-            <span className="text-[11px] font-mono text-rose-400">Usage Cost</span>
-          </div>
-        </div>
 
-        <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="font-mono uppercase tracking-wider">Net Profit Margin</span>
-            <div className={`p-1.5 rounded-lg bg-zinc-900 ${totals.netMargin >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              <TrendingUp className="h-4 w-4" />
+            {/* Net Profit Margin */}
+            <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span className="font-mono uppercase tracking-wider">Net Profit Margin</span>
+                <div className={`p-1.5 rounded-lg bg-zinc-900 ${hasData ? (totals.netMargin >= 0 ? "text-emerald-400" : "text-rose-400") : "text-zinc-600"}`}>
+                  <TrendingUp className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-3 flex items-baseline justify-between">
+                {hasData ? (
+                  <>
+                    <span className={`text-2xl font-bold font-mono ${totals.netMargin >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      ${totals.netMargin.toFixed(2)}
+                    </span>
+                    <span className={`text-[11px] font-mono ${totals.netMargin >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                      {totals.netPercentage.toFixed(1)}%
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-600">--</span>
+                    <span className="text-[11px] font-mono text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                      No Data
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="mt-3 flex items-baseline justify-between">
-            <span className={`text-2xl font-bold font-mono ${totals.netMargin >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              ${totals.netMargin.toFixed(2)}
-            </span>
-            <span className={`text-[11px] font-mono ${totals.netMargin >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
-              {totals.netPercentage.toFixed(1)}%
-            </span>
-          </div>
-        </div>
 
-        <div className={`p-4 rounded-xl bg-zinc-950/70 border flex flex-col justify-between ${totals.unprofitableCount > 0 ? "border-rose-900/60 bg-rose-950/20" : "border-zinc-800/80"}`}>
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="font-mono uppercase tracking-wider">Unprofitable Users</span>
-            <div className={`p-1.5 rounded-lg bg-zinc-900 ${totals.unprofitableCount > 0 ? "text-rose-400" : "text-zinc-500"}`}>
-              <AlertTriangle className="h-4 w-4" />
+            {/* Unprofitable Users */}
+            <div className={`p-4 rounded-xl bg-zinc-950/70 border flex flex-col justify-between ${hasData && totals.unprofitableCount > 0 ? "border-rose-900/60 bg-rose-950/20" : "border-zinc-800/80"}`}>
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span className="font-mono uppercase tracking-wider">Unprofitable Users</span>
+                <div className={`p-1.5 rounded-lg bg-zinc-900 ${hasData ? (totals.unprofitableCount > 0 ? "text-rose-400" : "text-zinc-500") : "text-zinc-600"}`}>
+                  <AlertTriangle className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-3 flex items-baseline justify-between">
+                {hasData ? (
+                  <>
+                    <span className={`text-2xl font-bold font-mono ${totals.unprofitableCount > 0 ? "text-rose-400" : "text-zinc-100"}`}>
+                      {totals.unprofitableCount}
+                    </span>
+                    <span className="text-[11px] font-mono text-zinc-500">Accounts</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-600">--</span>
+                    <span className="text-[11px] font-mono text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                      No Data
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
-          <div className="mt-3 flex items-baseline justify-between">
-            <span className={`text-2xl font-bold font-mono ${totals.unprofitableCount > 0 ? "text-rose-400" : "text-zinc-100"}`}>
-              {totals.unprofitableCount}
-            </span>
-            <span className="text-[11px] font-mono text-zinc-500">Accounts</span>
-          </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* ── Search Bar & Controls ────────────────────────────── */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">

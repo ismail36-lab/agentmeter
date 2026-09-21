@@ -286,65 +286,118 @@ export function SessionRollups() {
       </div>
 
       {/* ── KPI Summary Grid ───────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
-        <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="font-mono uppercase tracking-wider">Total Sessions</span>
-            <div className="p-1.5 rounded-lg bg-zinc-900 text-indigo-400">
-              <Layers className="h-4 w-4" />
+      {(() => {
+        const hasData = sessions.length > 0;
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
+            {/* Total Sessions */}
+            <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span className="font-mono uppercase tracking-wider">Total Sessions</span>
+                <div className={`p-1.5 rounded-lg bg-zinc-900 ${hasData ? "text-indigo-400" : "text-zinc-600"}`}>
+                  <Layers className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-3 flex items-baseline justify-between">
+                {hasData ? (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-100">{stats.totalSessions}</span>
+                    <span className="text-[11px] font-mono text-indigo-400">{stats.multiCallSessions} multi-call</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-600">--</span>
+                    <span className="text-[11px] font-mono text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                      No Data
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="mt-3 flex items-baseline justify-between">
-            <span className="text-2xl font-bold font-mono text-zinc-100">{stats.totalSessions}</span>
-            <span className="text-[11px] font-mono text-indigo-400">{stats.multiCallSessions} multi-call</span>
-          </div>
-        </div>
 
-        <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="font-mono uppercase tracking-wider">Avg Calls / Session</span>
-            <div className="p-1.5 rounded-lg bg-zinc-900 text-sky-400">
-              <Activity className="h-4 w-4" />
+            {/* Avg Calls / Session */}
+            <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span className="font-mono uppercase tracking-wider">Avg Calls / Session</span>
+                <div className={`p-1.5 rounded-lg bg-zinc-900 ${hasData ? "text-sky-400" : "text-zinc-600"}`}>
+                  <Activity className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-3 flex items-baseline justify-between">
+                {hasData ? (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-100">
+                      {stats.avgCallsPerSession.toFixed(1)}
+                    </span>
+                    <span className="text-[11px] font-mono text-sky-400">LLM Calls</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-600">--</span>
+                    <span className="text-[11px] font-mono text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                      No Data
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="mt-3 flex items-baseline justify-between">
-            <span className="text-2xl font-bold font-mono text-zinc-100">
-              {stats.avgCallsPerSession.toFixed(1)}
-            </span>
-            <span className="text-[11px] font-mono text-sky-400">LLM Calls</span>
-          </div>
-        </div>
 
-        <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="font-mono uppercase tracking-wider">Avg Cost / Session</span>
-            <div className="p-1.5 rounded-lg bg-zinc-900 text-emerald-400">
-              <DollarSign className="h-4 w-4" />
+            {/* Avg Cost / Session */}
+            <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span className="font-mono uppercase tracking-wider">Avg Cost / Session</span>
+                <div className={`p-1.5 rounded-lg bg-zinc-900 ${hasData ? "text-emerald-400" : "text-zinc-600"}`}>
+                  <DollarSign className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-3 flex items-baseline justify-between">
+                {hasData ? (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-100">
+                      ${stats.avgCostPerSession.toFixed(5)}
+                    </span>
+                    <span className="text-[11px] font-mono text-emerald-400">USD</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-600">--</span>
+                    <span className="text-[11px] font-mono text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                      No Data
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
-          </div>
-          <div className="mt-3 flex items-baseline justify-between">
-            <span className="text-2xl font-bold font-mono text-zinc-100">
-              ${stats.avgCostPerSession.toFixed(5)}
-            </span>
-            <span className="text-[11px] font-mono text-emerald-400">USD</span>
-          </div>
-        </div>
 
-        <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="font-mono uppercase tracking-wider">Avg Duration</span>
-            <div className="p-1.5 rounded-lg bg-zinc-900 text-amber-400">
-              <Clock className="h-4 w-4" />
+            {/* Avg Duration */}
+            <div className="p-4 rounded-xl bg-zinc-950/70 border border-zinc-800/80 flex flex-col justify-between">
+              <div className="flex items-center justify-between text-xs text-zinc-400">
+                <span className="font-mono uppercase tracking-wider">Avg Duration</span>
+                <div className={`p-1.5 rounded-lg bg-zinc-900 ${hasData ? "text-amber-400" : "text-zinc-600"}`}>
+                  <Clock className="h-4 w-4" />
+                </div>
+              </div>
+              <div className="mt-3 flex items-baseline justify-between">
+                {hasData ? (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-100">
+                      {formatDuration(stats.avgDuration)}
+                    </span>
+                    <span className="text-[11px] font-mono text-amber-400">Seconds</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-2xl font-bold font-mono text-zinc-600">--</span>
+                    <span className="text-[11px] font-mono text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                      No Data
+                    </span>
+                  </>
+                )}
+              </div>
             </div>
           </div>
-          <div className="mt-3 flex items-baseline justify-between">
-            <span className="text-2xl font-bold font-mono text-zinc-100">
-              {formatDuration(stats.avgDuration)}
-            </span>
-            <span className="text-[11px] font-mono text-amber-400">Seconds</span>
-          </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* ── Search Bar & Controls ────────────────────────────── */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">

@@ -19,6 +19,7 @@ export interface ModelBreakdownItem {
 interface ModelDistributionChartProps {
   data: ModelBreakdownItem[];
   totalSpend?: number;
+  totalRecords?: number;
 }
 
 const DEFAULT_COLORS: Record<string, string> = {
@@ -38,7 +39,7 @@ const DEFAULT_COLORS: Record<string, string> = {
   other: "#a855f7",
 };
 
-export function ModelDistributionChart({ data, totalSpend }: ModelDistributionChartProps) {
+export function ModelDistributionChart({ data, totalSpend, totalRecords }: ModelDistributionChartProps) {
   const chartData = (data && data.length > 0 ? data : [])
     .filter((item) => item.value > 0)
     .map((item) => ({
@@ -50,10 +51,14 @@ export function ModelDistributionChart({ data, totalSpend }: ModelDistributionCh
   const calculatedTotal = chartData.reduce((acc, curr) => acc + curr.value, 0);
   const displayTotal = totalSpend !== undefined && totalSpend > 0 ? totalSpend : calculatedTotal;
 
-  // Multi-model breakdown split for active data or clean empty state
-  const isPlaceholder = chartData.length === 0;
+  // Multi-model breakdown split for active data or clean empty state.
+  // When totalRecords === 0, dataset is explicitly empty regardless of fallback zeros.
+  const isPlaceholder =
+    totalRecords === 0 ||
+    (chartData.length === 0 && (totalRecords === undefined || totalRecords === 0));
+
   const renderData = isPlaceholder
-    ? [{ name: "No Activity", value: 1, color: "#27272a" }]
+    ? [{ name: "No Data", value: 1, color: "#18181b" }]
     : chartData;
 
   return (
@@ -81,12 +86,18 @@ export function ModelDistributionChart({ data, totalSpend }: ModelDistributionCh
               outerRadius={82}
               paddingAngle={isPlaceholder ? 0 : 4}
               dataKey="value"
-              stroke="#18181b"
-              strokeWidth={2}
+              stroke={isPlaceholder ? "#3f3f46" : "#18181b"}
+              strokeDasharray={isPlaceholder ? "4 4" : undefined}
+              strokeWidth={isPlaceholder ? 1.5 : 2}
               isAnimationActive={false}
             >
               {renderData.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={entry.color} />
+                <Cell
+                  key={`cell-${index}`}
+                  fill={entry.color}
+                  stroke={isPlaceholder ? "#3f3f46" : "#18181b"}
+                  strokeDasharray={isPlaceholder ? "4 4" : undefined}
+                />
               ))}
             </Pie>
             {!isPlaceholder && (
@@ -114,16 +125,29 @@ export function ModelDistributionChart({ data, totalSpend }: ModelDistributionCh
 
         {/* Center Donut Absolute Overlay Label */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
-          <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-500">Total</span>
-          <span className="text-sm font-bold font-mono text-zinc-100">${displayTotal.toFixed(4)}</span>
+          {isPlaceholder ? (
+            <>
+              <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-600">Total</span>
+              <span className="text-sm font-bold font-mono text-zinc-600">--</span>
+              <span className="mt-1 text-[9px] font-mono text-zinc-500 bg-zinc-950 border border-zinc-800/80 px-2 py-0.5 rounded">
+                No Data
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="text-[10px] uppercase font-mono tracking-wider text-zinc-500">Total</span>
+              <span className="text-sm font-bold font-mono text-zinc-100">${displayTotal.toFixed(4)}</span>
+            </>
+          )}
         </div>
       </div>
 
       {/* Legend Container */}
       <div className="px-5 pt-3 pb-4 border-t border-zinc-800/80 shrink-0">
         {isPlaceholder ? (
-          <div className="text-center text-xs text-zinc-500 font-mono py-1">
-            No activity logs recorded yet
+          <div className="flex items-center justify-center gap-2 text-center text-xs text-zinc-500 font-mono py-1">
+            <span className="h-2 w-2 rounded-full border border-dashed border-zinc-600 bg-zinc-800" />
+            <span>No Data Recorded</span>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
