@@ -3,8 +3,8 @@
  * POST /api/v1/ingest/edge
  *
  * - Runtime: Edge (Vercel/Cloudflare compatible)
- * - Auth: SHA-256 via Web Crypto API — no Node.js crypto dependency
- * - DB: 2 roundtrips maximum (auth lookup + insert)
+ * - Auth: SHA-256 via Web Crypto API
+ * - DB: 2 roundtrips maximum (auth lookup + usage_logs insert)
  * - Pricing: Static embedded table for zero DB pricing lookups
  */
 
@@ -26,55 +26,21 @@ export async function OPTIONS() {
   return new Response(null, { status: 204, headers: cors() });
 }
 
-// ── Helper: Case-Insensitive Header / Key Extraction ─────────────────────────
+// ── Supabase Edge Client ──────────────────────────────────────────────────────
 
-function cleanApiKey(rawKey: string): string {
-  return (rawKey || "").replace(/^["']|["']$/g, "").trim();
-}
-
-function extractApiKey(req: Request): string {
-  // 1. Check direct API key headers (req.headers.get is case-insensitive per Web API spec)
-  const xApiKey =
-    req.headers.get("x-api-key") ||
-    req.headers.get("api-key") ||
-    req.headers.get("x-api-token") ||
+function getEdgeSupabase() {
+  const url =
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    process.env.SUPABASE_URL ||
+    "https://placeholder.supabase.co";
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
     "";
-  if (xApiKey.trim()) {
-    return cleanApiKey(xApiKey);
-  }
-
-  // 2. Check Authorization header (Bearer <key> or bearer <key> or raw token)
-  const authHeader = req.headers.get("authorization") || "";
-  if (authHeader.trim()) {
-    const bearerMatch = authHeader.match(/^bearer\s+(.+)$/i);
-    if (bearerMatch && bearerMatch[1]) {
-      return cleanApiKey(bearerMatch[1]);
-    }
-    if (authHeader.trim().toLowerCase() !== "anonymous") {
-      return cleanApiKey(authHeader);
-    }
-  }
-
-  // 3. Fallback to query params (?api_key=<key> or ?key=<key>)
-  try {
-    const url = new URL(req.url);
-    const queryKey = url.searchParams.get("api_key") || url.searchParams.get("key");
-    if (queryKey) {
-      return cleanApiKey(queryKey);
-    }
-  } catch {}
-
-  return "";
-}
-
-// ── Web-Crypto SHA-256 (Edge-compatible) ─────────────────────────────────────
-
-async function sha256Hex(input: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(input);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 }
 
 // ── Static Model Pricing Table ────────────────────────────────────────────────
@@ -134,20 +100,6 @@ function lookupPricing(model: string): { pricing: PricingEntry; isEstimated: boo
   return { pricing: STATIC_PRICING["__default__"], isEstimated: true };
 }
 
-// ── Supabase Edge Client ──────────────────────────────────────────────────────
-
-function getEdgeSupabase() {
-  const url =
-    process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    "";
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
-
 // ── Request Body Schema ───────────────────────────────────────────────────────
 
 interface IngestPayload {
@@ -166,25 +118,61 @@ interface IngestPayload {
 
 export async function POST(req: Request) {
   try {
-    // ── 1. Extract API Key gracefully across headers & query params ──────────
-    const rawKey = extractApiKey(req);
+    // ── 1. Extract raw token from Authorization header (Bearer <key>) ────────
+    const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+    let token = "";
 
-    if (!rawKey) {
+    if (authHeader) {
+      const bearerMatch = authHeader.match(/^bearer\s+(.+)$/i);
+      if (bearerMatch && bearerMatch[1]) {
+        token = bearerMatch[1].trim();
+      } else if (authHeader.trim().toLowerCase() !== "anonymous") {
+        token = authHeader.trim();
+      }
+    }
+
+    if (!token) {
+      const xApiKey =
+        req.headers.get("x-api-key") ||
+        req.headers.get("api-key") ||
+        req.headers.get("x-api-token") ||
+        "";
+      if (xApiKey.trim()) {
+        token = xApiKey.trim();
+      }
+    }
+
+    if (!token) {
+      try {
+        const url = new URL(req.url);
+        const queryKey = url.searchParams.get("api_key") || url.searchParams.get("key");
+        if (queryKey) {
+          token = queryKey.trim();
+        }
+      } catch {}
+    }
+
+    token = token.replace(/^["']|["']$/g, "").trim();
+
+    if (!token || token.includes("...")) {
       return new Response(
-        JSON.stringify({ error: "Unauthorized: Missing API key" }),
+        JSON.stringify({
+          error: "Invalid or missing API key",
+          provided_token_length: token ? token.length : 0,
+        }),
         { status: 401, headers: { "Content-Type": "application/json", ...cors() } }
       );
     }
 
-    if (rawKey.includes("...")) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized: Received a masked placeholder instead of the full API key" }),
-        { status: 401, headers: { "Content-Type": "application/json", ...cors() } }
-      );
-    }
+    // ── 2. Hash raw API key using SHA-256 (Web Crypto API) ───────────────────
+    const encoder = new TextEncoder();
+    const data = encoder.encode(token);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+    const keyHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
 
-    // ── 2. Web Crypto API SHA-256 Auth Lookup (DB roundtrip #1) ──────────────
-    const keyHash = await sha256Hex(rawKey);
+    // ── 3. Match keyHash against key_hash column in api_keys table ───────────
     const supabase = getEdgeSupabase();
 
     const { data: keyRecord, error: keyError } = await supabase
@@ -194,26 +182,22 @@ export async function POST(req: Request) {
       .eq("is_active", true)
       .maybeSingle();
 
-    if (keyError) {
-      console.error("[edge-ingest] Auth DB error:", keyError.message);
+    if (keyError || !keyRecord) {
       return new Response(
-        JSON.stringify({ error: "Unauthorized: Key validation error" }),
+        JSON.stringify({
+          error: "Invalid or missing API key",
+          provided_token_length: token ? token.length : 0,
+        }),
         { status: 401, headers: { "Content-Type": "application/json", ...cors() } }
       );
     }
 
-    if (!keyRecord) {
-      return new Response(
-        JSON.stringify({ error: "Unauthorized: Invalid or inactive API key" }),
-        { status: 401, headers: { "Content-Type": "application/json", ...cors() } }
-      );
-    }
-
+    // ── 4. Set user_id and project_id from matched key ───────────────────────
     const userId: string = String(keyRecord.user_id ?? "anonymous");
     const apiKeyId: string = String(keyRecord.id);
     const projectId: string | null = keyRecord.project_id ? String(keyRecord.project_id) : null;
 
-    // ── 3. Parse + Validate Request Body ─────────────────────────────────────
+    // ── 5. Parse + Validate Request Body ─────────────────────────────────────
     let body: IngestPayload;
     try {
       body = await req.json();
@@ -249,13 +233,13 @@ export async function POST(req: Request) {
     const endUserId = body.end_user_id ? String(body.end_user_id) : null;
     const metadata = body.metadata ?? null;
 
-    // ── 4. Calculate Cost (static pricing — zero extra DB calls) ─────────────
+    // ── 6. Calculate Cost (static pricing — zero extra DB calls) ─────────────
     const { pricing, isEstimated } = lookupPricing(model);
     const totalCostUsd = Number(
       (promptTokens * pricing.input + completionTokens * pricing.output).toFixed(6)
     );
 
-    // ── 5. Budget Guard ───────────────────────────────────────────────────────
+    // ── 7. Budget Guard ───────────────────────────────────────────────────────
     const budgetCap = keyRecord.budget_cap_usd != null ? Number(keyRecord.budget_cap_usd) : null;
     const currentSpend = Number(keyRecord.current_period_spend_usd ?? 0);
     if (budgetCap !== null && keyRecord.budget_action === "block" && currentSpend >= budgetCap) {
@@ -269,7 +253,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 6. Insert into usage_logs with user_id, project_id, api_key_id (DB roundtrip #2) ──
+    // ── 8. Insert into usage_logs with user_id, project_id, api_key_id ────────
     const nowIso = new Date().toISOString();
     const logPayload: Record<string, unknown> = {
       user_id: userId,
@@ -306,7 +290,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 7. Return 202 Accepted with success: true, status: "ingested" ────────
+    // ── 9. Return 202 Accepted ────────────────────────────────────────────────
     return new Response(
       JSON.stringify({
         success: true,
