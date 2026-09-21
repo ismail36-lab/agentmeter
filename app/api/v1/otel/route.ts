@@ -36,43 +36,57 @@ export async function POST(req: NextRequest) {
     apiKey = apiKey.replace(/^["']|["']$/g, "").trim();
 
     if (!apiKey) {
+      console.log("[otel-route] Authentication failed: Missing API Key in Authorization or x-api-key header");
       return NextResponse.json(
         { error: "Unauthorized: Missing API Key in Authorization header or x-api-key" },
         { status: 401, headers: getCorsHeaders() }
       );
     }
 
-    // ── 2. Authenticate API Key ──
+    // ── 2. Authenticate API Key via SHA-256 hash lookup against api_keys table ──
     const authResult = await verifyApiKey(apiKey);
-    if (!authResult.success || !authResult.apiKeyRecord || !authResult.userId) {
+    if (!authResult.success || !authResult.apiKeyRecord) {
+      console.log("[otel-route] Authentication failed:", authResult.error);
       return NextResponse.json(
         { error: authResult.error || "Unauthorized: Invalid API Key" },
         { status: 401, headers: getCorsHeaders() }
       );
     }
 
-    const userId = authResult.userId;
+    // Set default user_id associated with the validated API key
+    const keyRecord = authResult.apiKeyRecord;
+    const userId = authResult.userId || keyRecord.user_id || "anonymous";
 
-    // ── 3. Parse OTLP JSON Body ──
-    const body = await req.json().catch(() => ({}));
-    const mappedSpans: MappedOtelSpan[] = parseOtelSpans(body);
+    // ── 3. Parse OTLP JSON Body safely ──
+    const body = await req.json().catch((jsonErr) => {
+      console.warn("[otel-route] Invalid or empty JSON body received:", jsonErr);
+      return {};
+    });
+
+    let mappedSpans: MappedOtelSpan[] = [];
+    try {
+      mappedSpans = parseOtelSpans(body);
+    } catch (parseErr: any) {
+      console.error("[otel-route] Failed parsing OTLP resourceSpans payload:", parseErr);
+      mappedSpans = [];
+    }
 
     if (mappedSpans.length === 0) {
-      // OTLP success response when no LLM spans matched in payload
+      // OTLP-compliant success response when no LLM spans matched in payload
       return NextResponse.json({}, { status: 200, headers: getCorsHeaders() });
     }
 
-    // ── 4. Process and Ingest Spans into usage_logs ──
+    // ── 4. Process and Ingest Mapped Spans into usage_logs ──
     const insertRows: Record<string, any>[] = [];
 
     for (const span of mappedSpans) {
-      const modelKey = span.model.toLowerCase().trim();
+      const modelKey = (span.model || "unknown-model").toLowerCase().trim();
 
-      // Look up pricing for span model
+      // Look up dynamic model pricing
       let inputRate = 1.0 / 1_000_000;
       let outputRate = 3.0 / 1_000_000;
       let isEstimated = true;
-      let provider = span.provider;
+      let provider = span.provider || "custom";
 
       try {
         let { data: pricingRow } = await supabaseAdmin
@@ -99,31 +113,31 @@ export async function POST(req: NextRequest) {
           outputRate = pricingRow.output_price_per_million / 1_000_000;
         }
       } catch (err) {
-        console.warn("[otel-ingest] DB model_pricing lookup notice:", err);
+        console.warn("[otel-route] DB model_pricing lookup notice:", err);
       }
 
       const cacheReadMult = getCacheReadMultiplier(provider, modelKey);
       const cacheReadRate = inputRate * cacheReadMult;
 
-      const safeCached = Math.max(0, span.cached_tokens);
-      const regularInput = Math.max(0, span.prompt_tokens - safeCached);
+      const safeCached = Math.max(0, span.cached_tokens || 0);
+      const regularInput = Math.max(0, (span.prompt_tokens || 0) - safeCached);
 
       const calculatedCost =
         (regularInput * inputRate) +
         (safeCached * cacheReadRate) +
-        (span.completion_tokens * outputRate);
+        ((span.completion_tokens || 0) * outputRate);
 
       const roundedCost = Number(calculatedCost.toFixed(6));
 
       insertRows.push({
         user_id: userId,
-        model: span.model,
+        model: span.model || "unknown-model",
         provider,
-        input_tokens: span.prompt_tokens,
-        output_tokens: span.completion_tokens,
+        input_tokens: Number(span.prompt_tokens || 0),
+        output_tokens: Number(span.completion_tokens || 0),
         total_cost_usd: roundedCost,
-        latency_ms: span.latency_ms,
-        status_code: span.status_code,
+        latency_ms: Number(span.latency_ms || 0),
+        status_code: Number(span.status_code || 200),
         is_estimated: isEstimated,
         ...(span.session_id && { session_id: span.session_id }),
         ...(span.agent_name && { agent_name: span.agent_name }),
@@ -137,7 +151,7 @@ export async function POST(req: NextRequest) {
         .insert(insertRows);
 
       if (insertError) {
-        console.error("[otel-ingest] Supabase insertion error:", insertError.message);
+        console.error("[otel-route] Supabase insert error:", insertError.message, insertError.details);
         return NextResponse.json(
           { error: `Database insertion failed: ${insertError.message}` },
           { status: 500, headers: getCorsHeaders() }
@@ -145,12 +159,13 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── 5. Return OTLP-compliant success response ──
+    // ── 5. Return OTLP-compliant success response ({}) with HTTP 200 ──
     return NextResponse.json({}, { status: 200, headers: getCorsHeaders() });
   } catch (error: any) {
-    console.error("[otel-ingest] Error handling OTLP trace ingestion:", error);
+    const errorMessage = error?.message || String(error) || "Internal Server Error";
+    console.error("[otel-route] 500 Internal Error during OTLP trace ingestion:", error);
     return NextResponse.json(
-      { error: "Internal Server Error", details: error.message || String(error) },
+      { error: errorMessage },
       { status: 500, headers: getCorsHeaders() }
     );
   }

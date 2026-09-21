@@ -68,11 +68,14 @@ export function getAttributeValue(val: any): any {
   if (val === null || val === undefined) return undefined;
   if (typeof val !== "object") return val;
   if ("stringValue" in val) return val.stringValue;
-  if ("intValue" in val) return Number(val.intValue);
+  if ("intValue" in val) {
+    const parsed = Number(val.intValue);
+    return isNaN(parsed) ? val.intValue : parsed;
+  }
   if ("doubleValue" in val) return Number(val.doubleValue);
   if ("boolValue" in val) return Boolean(val.boolValue);
   if ("arrayValue" in val) {
-    const values = val.arrayValue?.values || [];
+    const values = Array.isArray(val.arrayValue?.values) ? val.arrayValue.values : [];
     return values.map((v: any) => getAttributeValue(v));
   }
   if ("value" in val) return getAttributeValue(val.value);
@@ -86,24 +89,43 @@ export function parseAttributes(attributes: any): Record<string, any> {
   const result: Record<string, any> = {};
   if (!attributes) return result;
 
-  if (Array.isArray(attributes)) {
-    for (const attr of attributes) {
-      if (attr && typeof attr === "object" && attr.key) {
-        result[attr.key] = getAttributeValue(attr.value ?? attr);
+  try {
+    if (Array.isArray(attributes)) {
+      for (const attr of attributes) {
+        if (attr && typeof attr === "object" && attr.key) {
+          result[attr.key] = getAttributeValue(attr.value ?? attr);
+        }
+      }
+    } else if (typeof attributes === "object") {
+      for (const [key, val] of Object.entries(attributes)) {
+        result[key] = getAttributeValue(val);
       }
     }
-  } else if (typeof attributes === "object") {
-    for (const [key, val] of Object.entries(attributes)) {
-      result[key] = getAttributeValue(val);
-    }
+  } catch (err) {
+    console.warn("[otel-adapter] Notice parsing attribute list:", err);
   }
   return result;
+}
+
+/**
+ * Safely parses integer token counts from numeric values or strings
+ */
+export function parseTokenCount(val: any): number {
+  if (val === null || val === undefined) return 0;
+  const extracted = getAttributeValue(val);
+  if (extracted === null || extracted === undefined) return 0;
+  if (typeof extracted === "number") {
+    return isNaN(extracted) || extracted < 0 ? 0 : Math.floor(extracted);
+  }
+  const parsed = parseInt(String(extracted).trim(), 10);
+  return isNaN(parsed) || parsed < 0 ? 0 : parsed;
 }
 
 /**
  * Inspects parsed attributes to find the first matching value for a list of candidate keys
  */
 function findFirstAttribute(attrs: Record<string, any>, candidateKeys: string[]): any {
+  if (!attrs || typeof attrs !== "object") return undefined;
   for (const key of candidateKeys) {
     if (key in attrs && attrs[key] !== undefined && attrs[key] !== null) {
       return attrs[key];
@@ -136,158 +158,171 @@ export function inferProvider(modelName: string, explicitProvider?: string): str
 }
 
 /**
- * Parses an OTLP JSON payload and extracts mapped GenAI / LLM spans
+ * Parses an OTLP JSON payload and extracts mapped GenAI / LLM spans.
+ * Completely null-safe and wrapped in try/catch block.
  */
 export function parseOtelSpans(payload: OTLPPayload | any): MappedOtelSpan[] {
   const mappedSpans: MappedOtelSpan[] = [];
   if (!payload || typeof payload !== "object") return mappedSpans;
 
-  const resourceSpans: ResourceSpan[] = Array.isArray(payload.resourceSpans)
-    ? payload.resourceSpans
-    : [];
+  try {
+    const resourceSpans: ResourceSpan[] = Array.isArray(payload.resourceSpans)
+      ? payload.resourceSpans
+      : [];
 
-  for (const resSpan of resourceSpans) {
-    const resourceAttrs = parseAttributes(resSpan.resource?.attributes);
-    const scopeSpans = Array.isArray(resSpan.scopeSpans) ? resSpan.scopeSpans : [];
+    for (const resSpan of resourceSpans) {
+      if (!resSpan || typeof resSpan !== "object") continue;
 
-    for (const scopeSpan of scopeSpans) {
-      const spans = Array.isArray(scopeSpan.spans) ? scopeSpan.spans : [];
+      const resourceAttrs = parseAttributes(resSpan.resource?.attributes);
+      const scopeSpans = Array.isArray(resSpan.scopeSpans) ? resSpan.scopeSpans : [];
 
-      for (const span of spans) {
-        if (!span || typeof span !== "object") continue;
+      for (const scopeSpan of scopeSpans) {
+        if (!scopeSpan || typeof scopeSpan !== "object") continue;
 
-        const spanAttrs = parseAttributes(span.attributes);
-        const mergedAttrs = { ...resourceAttrs, ...spanAttrs };
+        const spans = Array.isArray(scopeSpan.spans) ? scopeSpan.spans : [];
 
-        // Check model attribute keys
-        const modelName = findFirstAttribute(spanAttrs, [
-          "gen_ai.request.model",
-          "gen_ai.response.model",
-          "llm.model",
-          "model",
-          "gen_ai.model",
-          "request.model",
-        ]) || findFirstAttribute(resourceAttrs, ["gen_ai.request.model", "llm.model", "model"]);
+        for (const span of spans) {
+          if (!span || typeof span !== "object") continue;
 
-        // Check token attribute keys
-        const promptTokensVal = findFirstAttribute(spanAttrs, [
-          "gen_ai.usage.prompt_tokens",
-          "gen_ai.usage.input_tokens",
-          "llm.usage.prompt_tokens",
-          "llm.usage.input_tokens",
-          "prompt_tokens",
-          "input_tokens",
-        ]);
+          const spanAttrs = parseAttributes(span.attributes);
+          const mergedAttrs = { ...resourceAttrs, ...spanAttrs };
 
-        const completionTokensVal = findFirstAttribute(spanAttrs, [
-          "gen_ai.usage.completion_tokens",
-          "gen_ai.usage.output_tokens",
-          "llm.usage.completion_tokens",
-          "llm.usage.output_tokens",
-          "completion_tokens",
-          "output_tokens",
-        ]);
+          // Check model attribute keys with fallback to "unknown-model" if missing
+          const modelNameRaw = findFirstAttribute(spanAttrs, [
+            "gen_ai.request.model",
+            "gen_ai.response.model",
+            "llm.model",
+            "model",
+            "gen_ai.model",
+            "request.model",
+          ]) || findFirstAttribute(resourceAttrs, ["gen_ai.request.model", "llm.model", "model"]);
 
-        const totalTokensVal = findFirstAttribute(spanAttrs, [
-          "gen_ai.usage.total_tokens",
-          "llm.usage.total_tokens",
-          "total_tokens",
-        ]);
+          const resolvedModel = (modelNameRaw && String(modelNameRaw).trim())
+            ? String(modelNameRaw).trim()
+            : "unknown-model";
 
-        const cachedTokensVal = findFirstAttribute(spanAttrs, [
-          "gen_ai.usage.cached_tokens",
-          "llm.usage.cached_tokens",
-          "cached_tokens",
-          "cache_read_tokens",
-        ]);
+          // Safely parse token counts
+          const promptTokensVal = findFirstAttribute(spanAttrs, [
+            "gen_ai.usage.prompt_tokens",
+            "gen_ai.usage.input_tokens",
+            "llm.usage.prompt_tokens",
+            "llm.usage.input_tokens",
+            "prompt_tokens",
+            "input_tokens",
+          ]);
 
-        // Determine if this span is an LLM / GenAI telemetry span
-        const isGenAiSpan =
-          Boolean(modelName) ||
-          promptTokensVal !== undefined ||
-          completionTokensVal !== undefined ||
-          String(span.name || "").toLowerCase().includes("openai") ||
-          String(span.name || "").toLowerCase().includes("llm") ||
-          String(span.name || "").toLowerCase().includes("completion") ||
-          String(span.name || "").toLowerCase().includes("chat");
+          const completionTokensVal = findFirstAttribute(spanAttrs, [
+            "gen_ai.usage.completion_tokens",
+            "gen_ai.usage.output_tokens",
+            "llm.usage.completion_tokens",
+            "llm.usage.output_tokens",
+            "completion_tokens",
+            "output_tokens",
+          ]);
 
-        if (!isGenAiSpan) continue;
+          const totalTokensVal = findFirstAttribute(spanAttrs, [
+            "gen_ai.usage.total_tokens",
+            "llm.usage.total_tokens",
+            "total_tokens",
+          ]);
 
-        const resolvedModel = String(modelName || "gpt-4o").trim();
-        const pTokens = Math.max(0, Number(promptTokensVal || 0));
-        const cTokens = Math.max(0, Number(completionTokensVal || 0));
-        const tTokens = Math.max(pTokens + cTokens, Number(totalTokensVal || pTokens + cTokens));
-        const cachedTokens = Math.max(0, Number(cachedTokensVal || 0));
+          const cachedTokensVal = findFirstAttribute(spanAttrs, [
+            "gen_ai.usage.cached_tokens",
+            "llm.usage.cached_tokens",
+            "cached_tokens",
+            "cache_read_tokens",
+          ]);
 
-        // Calculate span latency in milliseconds from nanosecond timestamps
-        let latencyMs = 0;
-        if (span.startTimeUnixNano && span.endTimeUnixNano) {
-          try {
-            const startNano = BigInt(span.startTimeUnixNano);
-            const endNano = BigInt(span.endTimeUnixNano);
-            const diffNano = endNano - startNano;
-            latencyMs = Math.max(0, Number(diffNano) / 1_000_000);
-          } catch {
-            const startNum = Number(span.startTimeUnixNano);
-            const endNum = Number(span.endTimeUnixNano);
-            if (!isNaN(startNum) && !isNaN(endNum)) {
-              latencyMs = Math.max(0, (endNum - startNum) / 1_000_000);
+          const pTokens = parseTokenCount(promptTokensVal);
+          const cTokens = parseTokenCount(completionTokensVal);
+          const rawTotal = parseTokenCount(totalTokensVal);
+          const tTokens = Math.max(pTokens + cTokens, rawTotal);
+          const cachedTokens = parseTokenCount(cachedTokensVal);
+
+          // Determine if this span is an LLM / GenAI telemetry span
+          const isGenAiSpan =
+            Boolean(modelNameRaw) ||
+            promptTokensVal !== undefined ||
+            completionTokensVal !== undefined ||
+            String(span.name || "").toLowerCase().includes("openai") ||
+            String(span.name || "").toLowerCase().includes("llm") ||
+            String(span.name || "").toLowerCase().includes("completion") ||
+            String(span.name || "").toLowerCase().includes("chat");
+
+          if (!isGenAiSpan) continue;
+
+          // Calculate span latency in milliseconds from nanosecond timestamps
+          let latencyMs = 0;
+          if (span.startTimeUnixNano && span.endTimeUnixNano) {
+            try {
+              const startNano = BigInt(span.startTimeUnixNano);
+              const endNano = BigInt(span.endTimeUnixNano);
+              const diffNano = endNano - startNano;
+              latencyMs = Math.max(0, Number(diffNano) / 1_000_000);
+            } catch {
+              const startNum = Number(span.startTimeUnixNano);
+              const endNum = Number(span.endTimeUnixNano);
+              if (!isNaN(startNum) && !isNaN(endNum)) {
+                latencyMs = Math.max(0, (endNum - startNum) / 1_000_000);
+              }
             }
           }
+
+          // Environment, Agent Name, Session ID
+          const env = String(
+            findFirstAttribute(mergedAttrs, [
+              "gen_ai.environment",
+              "environment",
+              "deployment.environment",
+              "service.environment",
+              "service.namespace",
+            ]) || "production"
+          ).toLowerCase();
+
+          const agentName = String(
+            findFirstAttribute(mergedAttrs, [
+              "gen_ai.agent.name",
+              "agent_name",
+              "agent",
+              "service.name",
+            ]) || span.name || "default-agent"
+          );
+
+          const sessionId = String(
+            findFirstAttribute(mergedAttrs, [
+              "gen_ai.session.id",
+              "session_id",
+              "sessionId",
+            ]) || ""
+          ).trim() || null;
+
+          const explicitProvider = findFirstAttribute(mergedAttrs, ["gen_ai.system", "provider", "llm.provider"]);
+          const provider = inferProvider(resolvedModel, explicitProvider);
+
+          let statusCode = 200;
+          if (span.status?.code === "ERROR" || span.status?.code === 2 || span.status?.code === "2") {
+            statusCode = 500;
+          }
+
+          mappedSpans.push({
+            model: resolvedModel,
+            provider,
+            prompt_tokens: pTokens,
+            completion_tokens: cTokens,
+            total_tokens: tTokens,
+            cached_tokens: cachedTokens,
+            latency_ms: Math.round(latencyMs),
+            environment: env,
+            agent_name: agentName,
+            session_id: sessionId,
+            status_code: statusCode,
+            raw_attributes: mergedAttrs,
+          });
         }
-
-        // Environment, Agent Name, Session ID
-        const env = String(
-          findFirstAttribute(mergedAttrs, [
-            "gen_ai.environment",
-            "environment",
-            "deployment.environment",
-            "service.environment",
-            "service.namespace",
-          ]) || "production"
-        ).toLowerCase();
-
-        const agentName = String(
-          findFirstAttribute(mergedAttrs, [
-            "gen_ai.agent.name",
-            "agent_name",
-            "agent",
-            "service.name",
-          ]) || span.name || "default-agent"
-        );
-
-        const sessionId = String(
-          findFirstAttribute(mergedAttrs, [
-            "gen_ai.session.id",
-            "session_id",
-            "sessionId",
-          ]) || ""
-        ).trim() || null;
-
-        const explicitProvider = findFirstAttribute(mergedAttrs, ["gen_ai.system", "provider", "llm.provider"]);
-        const provider = inferProvider(resolvedModel, explicitProvider);
-
-        let statusCode = 200;
-        if (span.status?.code === "ERROR" || span.status?.code === 2 || span.status?.code === "2") {
-          statusCode = 500;
-        }
-
-        mappedSpans.push({
-          model: resolvedModel,
-          provider,
-          prompt_tokens: pTokens,
-          completion_tokens: cTokens,
-          total_tokens: tTokens,
-          cached_tokens: cachedTokens,
-          latency_ms: Math.round(latencyMs),
-          environment: env,
-          agent_name: agentName,
-          session_id: sessionId,
-          status_code: statusCode,
-          raw_attributes: mergedAttrs,
-        });
       }
     }
+  } catch (err: any) {
+    console.error("[otel-adapter] Error parsing OTLP resourceSpans payload:", err);
   }
 
   return mappedSpans;
