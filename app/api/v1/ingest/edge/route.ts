@@ -253,7 +253,6 @@ export async function POST(req: Request) {
 
     // ── 5. Set user_id and project_id from matched key ───────────────────────
     const userId: string = String(keyRecord.user_id ?? "anonymous");
-    const apiKeyId: string = String(keyRecord.id);
     const projectId: string | null = keyRecord.project_id ? String(keyRecord.project_id) : null;
 
     // ── 6. Parse + Validate Request Body ─────────────────────────────────────
@@ -277,6 +276,7 @@ export async function POST(req: Request) {
 
     const promptTokens = Math.max(0, Number(body.prompt_tokens) || 0);
     const completionTokens = Math.max(0, Number(body.completion_tokens) || 0);
+    const totalTokens = promptTokens + completionTokens;
     const latencyMs = Math.max(0, Number(body.latency_ms) || 0);
     const sessionId = body.session_id ? String(body.session_id) : null;
     const environment = body.environment
@@ -312,16 +312,19 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 9. Insert usage metrics into usage_logs ──────────────────────────────
+    // ── 9. Insert usage metrics into usage_logs (DO NOT PASS api_key_id) ─────
     const nowIso = new Date().toISOString();
     const logPayload: Record<string, unknown> = {
       user_id: userId,
-      api_key_id: apiKeyId,
       ...(projectId   && { project_id: projectId }),
-      provider: pricing.provider,
       model,
+      provider: pricing.provider,
+      prompt_tokens: promptTokens,
       input_tokens: promptTokens,
+      completion_tokens: completionTokens,
       output_tokens: completionTokens,
+      total_tokens: totalTokens,
+      cost: totalCostUsd,
       total_cost_usd: totalCostUsd,
       is_estimated: isEstimated,
       latency_ms: latencyMs,
@@ -335,33 +338,50 @@ export async function POST(req: Request) {
       ...(metadata    && { metadata }),
     };
 
-    const { data: insertedLog, error: insertError } = await supabase
-      .from("usage_logs")
-      .insert([logPayload])
-      .select("id")
-      .single();
+    try {
+      const { data: insertedLog, error: insertError } = await supabase
+        .from("usage_logs")
+        .insert([logPayload])
+        .select("id")
+        .single();
 
-    if (insertError) {
-      console.error("[edge-ingest] Insert error:", insertError.message, insertError.details);
+      if (insertError) {
+        console.error("[edge-ingest] Primary insert error:", insertError.message, insertError.details);
+        // Fallback without .select("id").single()
+        const { error: fallbackError } = await supabase
+          .from("usage_logs")
+          .insert([logPayload]);
+
+        if (fallbackError) {
+          console.error("[edge-ingest] Fallback insert error:", fallbackError.message);
+          return new Response(
+            JSON.stringify({ error: `Database insert failed: ${fallbackError.message}` }),
+            { status: 500, headers: { "Content-Type": "application/json", ...cors() } }
+          );
+        }
+      }
+
+      // ── 10. Return HTTP 202 status with body { success: true, status: "ingested" } ─
       return new Response(
-        JSON.stringify({ error: `Database insert failed: ${insertError.message}` }),
+        JSON.stringify({
+          success: true,
+          status: "ingested",
+          log_id: insertedLog?.id ?? null,
+          model,
+          provider: pricing.provider,
+          calculated_cost: totalCostUsd,
+          is_estimated: isEstimated,
+        }),
+        { status: 202, headers: { "Content-Type": "application/json", ...cors() } }
+      );
+    } catch (dbErr: unknown) {
+      const message = dbErr instanceof Error ? dbErr.message : "Database insertion error";
+      console.error("[edge-ingest] Insert try-catch error:", dbErr);
+      return new Response(
+        JSON.stringify({ error: `Database insert failed: ${message}` }),
         { status: 500, headers: { "Content-Type": "application/json", ...cors() } }
       );
     }
-
-    // ── 10. Return HTTP 202 status with body { success: true, status: "ingested" } ─
-    return new Response(
-      JSON.stringify({
-        success: true,
-        status: "ingested",
-        log_id: insertedLog?.id ?? null,
-        model,
-        provider: pricing.provider,
-        calculated_cost: totalCostUsd,
-        is_estimated: isEstimated,
-      }),
-      { status: 202, headers: { "Content-Type": "application/json", ...cors() } }
-    );
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal Server Error";
     console.error("[edge-ingest] Unhandled error:", err);
