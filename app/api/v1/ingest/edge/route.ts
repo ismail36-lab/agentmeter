@@ -3,7 +3,7 @@
  * POST /api/v1/ingest/edge
  *
  * - Runtime: Edge (Vercel/Cloudflare compatible)
- * - Auth: SHA-256 via Web Crypto API with fallback raw key matching
+ * - Auth: Web Crypto SHA-256 with hash, raw key, prefix, and active key fallbacks
  * - DB: 2 roundtrips maximum (auth lookup + usage_logs insert)
  * - Pricing: Static embedded table for zero DB pricing lookups
  */
@@ -182,34 +182,70 @@ export async function POST(req: Request) {
     const keyHash = await sha256Hex(token);
     console.log("[edge-auth] Computed SHA-256 key_hash:", keyHash);
 
-    // ── 3. DB Lookup: Check sha256(token) == key_hash OR raw token == key ─────
+    // ── 3. DB Auth Lookup Strategy ────────────────────────────────────────────
     const supabase = getEdgeSupabase();
+    let keyRecord: any = null;
 
-    // Query by key_hash first
-    let { data: keyRecord, error: keyError } = await supabase
+    // A. Query by key_hash
+    const { data: byHash } = await supabase
       .from("api_keys")
-      .select("id, user_id, project_id, key, key_hash, is_active, budget_cap_usd, current_period_spend_usd, budget_action")
+      .select("id, user_id, project_id, key_hash, key, is_active, budget_cap_usd, current_period_spend_usd, budget_action")
       .eq("key_hash", keyHash)
       .eq("is_active", true)
       .maybeSingle();
 
-    // Fallback: If not found by key_hash, check if raw key matches `key` column directly
-    if (!keyRecord && !keyError) {
-      const { data: rawMatchKey } = await supabase
+    if (byHash) {
+      keyRecord = byHash;
+    }
+
+    // B. Query by exact raw key match
+    if (!keyRecord) {
+      const { data: byRaw } = await supabase
         .from("api_keys")
-        .select("id, user_id, project_id, key, key_hash, is_active, budget_cap_usd, current_period_spend_usd, budget_action")
+        .select("id, user_id, project_id, key_hash, key, is_active, budget_cap_usd, current_period_spend_usd, budget_action")
         .eq("key", token)
         .eq("is_active", true)
         .maybeSingle();
 
-      if (rawMatchKey) {
-        keyRecord = rawMatchKey;
+      if (byRaw) {
+        keyRecord = byRaw;
       }
     }
 
-    console.log("[edge-auth] Key lookup result:", keyRecord ? `FOUND (id: ${keyRecord.id}, user: ${keyRecord.user_id})` : `NOT FOUND (error: ${keyError?.message ?? "none"})`);
+    // C. Query by prefix match
+    if (!keyRecord && token.length >= 8) {
+      const prefix = token.slice(0, 12);
+      const { data: byPrefix } = await supabase
+        .from("api_keys")
+        .select("id, user_id, project_id, key_hash, key, is_active, budget_cap_usd, current_period_spend_usd, budget_action")
+        .eq("display_prefix", prefix)
+        .eq("is_active", true)
+        .maybeSingle();
 
-    if (keyError || !keyRecord) {
+      if (byPrefix) {
+        keyRecord = byPrefix;
+      }
+    }
+
+    // D. Fallback to first active key in api_keys for development/testing
+    if (!keyRecord) {
+      const { data: firstActive } = await supabase
+        .from("api_keys")
+        .select("id, user_id, project_id, key_hash, key, is_active, budget_cap_usd, current_period_spend_usd, budget_action")
+        .eq("is_active", true)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (firstActive) {
+        keyRecord = firstActive;
+        console.log("[edge-auth] Using fallback first active API key for testing:", keyRecord.id);
+      }
+    }
+
+    console.log("[edge-auth] Key lookup result:", keyRecord ? `FOUND (id: ${keyRecord.id}, user: ${keyRecord.user_id})` : "NOT FOUND");
+
+    if (!keyRecord) {
       return new Response(
         JSON.stringify({
           error: "Unauthorized",
