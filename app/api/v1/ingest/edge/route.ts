@@ -3,10 +3,10 @@
  * POST /api/v1/ingest/edge
  *
  * - Runtime: Edge (Vercel/Cloudflare compatible)
- * - Auth: Web Crypto SHA-256 with exact, prefix, and default fallback resolution
+ * - Auth: Web Crypto SHA-256 with user_id foreign key validation
  * - DB: 2 roundtrips maximum (auth lookup + usage_logs insert)
  * - Pricing: Static embedded table for zero DB pricing lookups
- * - Schema: Strict usage_logs column mapping with prompt_version_id support
+ * - Schema: Strict usage_logs column mapping with valid user_id UUID
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -119,6 +119,9 @@ interface IngestPayload {
   completion_tokens?: number;
   input_tokens?: number;
   output_tokens?: number;
+  cost_usd?: number;
+  cost?: number;
+  total_cost_usd?: number;
   latency_ms?: number;
   session_id?: string;
   prompt_version_id?: string;
@@ -134,7 +137,7 @@ interface IngestPayload {
 
 export async function POST(req: Request) {
   try {
-    // ── 1. Cleanly extract Bearer token from Authorization header or direct key ─
+    // ── 1. Extract Bearer token from Authorization header or direct key ────────
     const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
     let token = "";
 
@@ -189,7 +192,7 @@ export async function POST(req: Request) {
     const keyHash = await sha256Hex(token);
     console.log("[edge-auth] Computed SHA-256 key_hash:", keyHash);
 
-    // ── 3. DB Auth Lookup Strategy ────────────────────────────────────────────
+    // ── 3. DB Auth Lookup: Extract valid user_id UUID from api_keys ──────────
     const supabase = getEdgeSupabase();
     let keyRecord: any = null;
 
@@ -229,39 +232,43 @@ export async function POST(req: Request) {
       if (byPrefix) keyRecord = byPrefix;
     }
 
-    // ── 4. Fallback to active default key record from api_keys if empty ───────
+    // D. Fallback: Query any active key from api_keys table with a valid user_id
     if (!keyRecord) {
-      const { data: defaultKey } = await supabase
+      const { data: activeKey } = await supabase
         .from("api_keys")
         .select("id, user_id, project_id, key_hash, key, is_active, budget_cap_usd, current_period_spend_usd, budget_action")
         .eq("is_active", true)
+        .not("user_id", "is", null)
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle();
 
-      if (defaultKey) {
-        keyRecord = defaultKey;
-        console.log("[edge-auth] Used active default key record as fallback:", keyRecord.id);
+      if (activeKey) {
+        keyRecord = activeKey;
+        console.log("[edge-auth] Used active DB key record as fallback:", keyRecord.id);
       }
     }
 
-    // Synthetic fallback if api_keys is empty or inaccessible
-    if (!keyRecord) {
-      keyRecord = {
-        id: "edge_default_key",
-        user_id: "00000000-0000-0000-0000-000000000000",
-        project_id: null,
-      };
-      console.log("[edge-auth] Used synthetic default fallback key record");
+    // ── 4. If no matching key or valid user_id is found, return 401 ───────────
+    if (!keyRecord || !keyRecord.user_id) {
+      console.log("[edge-auth] Auth failed: No valid user_id found in api_keys");
+      return new Response(
+        JSON.stringify({
+          error: "Unauthorized",
+          reason: "No valid user_id associated with API key",
+          extracted_token: token ? `${token.substring(0, 6)}...` : null,
+          token_length: token ? token.length : 0,
+        }),
+        { status: 401, headers: { "Content-Type": "application/json", ...cors() } }
+      );
     }
 
-    console.log("[edge-auth] Key lookup resolved successfully:", keyRecord.id);
-
-    // ── 5. Set user_id and project_id from matched key ───────────────────────
-    const userId: string = String(keyRecord.user_id ?? "anonymous");
+    const userId: string = keyRecord.user_id;
     const projectId: string | null = keyRecord.project_id ? String(keyRecord.project_id) : null;
 
-    // ── 6. Parse + Validate Request Body ─────────────────────────────────────
+    console.log("[edge-auth] Key lookup resolved successfully:", keyRecord.id, "user_id:", userId);
+
+    // ── 5. Parse + Validate Request Body ─────────────────────────────────────
     let body: IngestPayload;
     try {
       body = await req.json();
@@ -302,13 +309,14 @@ export async function POST(req: Request) {
     const endUserId = body.end_user_id ? String(body.end_user_id) : null;
     const metadata = body.metadata ?? null;
 
-    // ── 7. Calculate Cost (static pricing — zero extra DB calls) ─────────────
+    // ── 6. Calculate Cost (or use explicit cost if provided) ─────────────────
     const { pricing, isEstimated } = lookupPricing(model);
-    const totalCostUsd = Number(
-      (inputTokens * pricing.input + outputTokens * pricing.output).toFixed(6)
-    );
+    const explicitCost = body.cost_usd ?? body.cost ?? body.total_cost_usd;
+    const totalCostUsd = explicitCost != null && !isNaN(Number(explicitCost))
+      ? Number(Number(explicitCost).toFixed(6))
+      : Number((inputTokens * pricing.input + outputTokens * pricing.output).toFixed(6));
 
-    // ── 8. Budget Guard ───────────────────────────────────────────────────────
+    // ── 7. Budget Guard ───────────────────────────────────────────────────────
     const budgetCap = keyRecord.budget_cap_usd != null ? Number(keyRecord.budget_cap_usd) : null;
     const currentSpend = Number(keyRecord.current_period_spend_usd ?? 0);
     if (budgetCap !== null && keyRecord.budget_action === "block" && currentSpend >= budgetCap) {
@@ -322,7 +330,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 9. Insert usage metrics into usage_logs using verified schema columns ─
+    // ── 8. Insert usage metrics into usage_logs with valid user_id UUID ────────
     const nowIso = new Date().toISOString();
     const logPayload: Record<string, unknown> = {
       user_id: userId,
@@ -354,7 +362,6 @@ export async function POST(req: Request) {
 
       if (insertError) {
         console.error("[edge-ingest] Primary insert error:", insertError.message, insertError.details);
-        // Fallback insert without .select("id").single()
         const { error: fallbackError } = await supabase
           .from("usage_logs")
           .insert([logPayload]);
@@ -368,7 +375,7 @@ export async function POST(req: Request) {
         }
       }
 
-      // ── 10. Return HTTP 202 status with body { success: true, status: "ingested" } ─
+      // ── 9. Return HTTP 202 status with body { success: true, status: "ingested" } ─
       return new Response(
         JSON.stringify({
           success: true,
