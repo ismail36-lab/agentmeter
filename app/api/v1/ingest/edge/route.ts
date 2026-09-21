@@ -18,7 +18,7 @@ function cors() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key, api-key, x-api-token",
   };
 }
 
@@ -26,9 +26,58 @@ export async function OPTIONS() {
   return new Response(null, { status: 204, headers: cors() });
 }
 
+// ── Helper: Case-Insensitive Header / Key Extraction ─────────────────────────
+
+function cleanApiKey(rawKey: string): string {
+  return (rawKey || "").replace(/^["']|["']$/g, "").trim();
+}
+
+function extractApiKey(req: Request): string {
+  // 1. Check direct API key headers (req.headers.get is case-insensitive per Web API spec)
+  const xApiKey =
+    req.headers.get("x-api-key") ||
+    req.headers.get("api-key") ||
+    req.headers.get("x-api-token") ||
+    "";
+  if (xApiKey.trim()) {
+    return cleanApiKey(xApiKey);
+  }
+
+  // 2. Check Authorization header (Bearer <key> or bearer <key> or raw token)
+  const authHeader = req.headers.get("authorization") || "";
+  if (authHeader.trim()) {
+    const bearerMatch = authHeader.match(/^bearer\s+(.+)$/i);
+    if (bearerMatch && bearerMatch[1]) {
+      return cleanApiKey(bearerMatch[1]);
+    }
+    if (authHeader.trim().toLowerCase() !== "anonymous") {
+      return cleanApiKey(authHeader);
+    }
+  }
+
+  // 3. Fallback to query params (?api_key=<key> or ?key=<key>)
+  try {
+    const url = new URL(req.url);
+    const queryKey = url.searchParams.get("api_key") || url.searchParams.get("key");
+    if (queryKey) {
+      return cleanApiKey(queryKey);
+    }
+  } catch {}
+
+  return "";
+}
+
+// ── Web-Crypto SHA-256 (Edge-compatible) ─────────────────────────────────────
+
+async function sha256Hex(input: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 // ── Static Model Pricing Table ────────────────────────────────────────────────
-// Rates are per-token (not per-million).
-// Update this table as pricing changes; add new models as needed.
 
 type PricingEntry = {
   provider: string;
@@ -57,7 +106,7 @@ const STATIC_PRICING: Record<string, PricingEntry> = {
   "gemini-2.0-flash":           { provider: "google", input: 0.1  / 1_000_000, output: 0.4   / 1_000_000 },
   "gemini-1.5-pro":             { provider: "google", input: 1.25 / 1_000_000, output: 5.0   / 1_000_000 },
   "gemini-1.5-flash":           { provider: "google", input: 0.075/ 1_000_000, output: 0.3   / 1_000_000 },
-  // Meta / open-source (via inference providers)
+  // Meta / open-source
   "llama-3.1-405b-instruct":    { provider: "meta",  input: 3.0  / 1_000_000, output: 3.0   / 1_000_000 },
   "llama-3.1-70b-instruct":     { provider: "meta",  input: 0.88 / 1_000_000, output: 0.88  / 1_000_000 },
   "llama-3.1-8b-instruct":      { provider: "meta",  input: 0.18 / 1_000_000, output: 0.18  / 1_000_000 },
@@ -69,17 +118,10 @@ const STATIC_PRICING: Record<string, PricingEntry> = {
   "__default__":                { provider: "custom",  input: 1.0  / 1_000_000, output: 3.0   / 1_000_000 },
 };
 
-/**
- * Look up pricing for a model string. Supports partial prefix matching
- * (e.g. "claude-sonnet-4-5-20250930" matches "claude-sonnet-4-5").
- */
 function lookupPricing(model: string): { pricing: PricingEntry; isEstimated: boolean } {
   const key = model.toLowerCase().trim();
-
-  // Exact match
   if (STATIC_PRICING[key]) return { pricing: STATIC_PRICING[key], isEstimated: false };
 
-  // Prefix match (longest wins)
   let best: string | null = null;
   for (const tableKey of Object.keys(STATIC_PRICING)) {
     if (tableKey === "__default__") continue;
@@ -92,18 +134,7 @@ function lookupPricing(model: string): { pricing: PricingEntry; isEstimated: boo
   return { pricing: STATIC_PRICING["__default__"], isEstimated: true };
 }
 
-// ── Web-Crypto SHA-256 (Edge-compatible) ─────────────────────────────────────
-
-async function sha256Hex(input: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(input);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 // ── Supabase Edge Client ──────────────────────────────────────────────────────
-// No server-only imports, no globalThis singletons — safe for Edge.
 
 function getEdgeSupabase() {
   const url =
@@ -135,20 +166,8 @@ interface IngestPayload {
 
 export async function POST(req: Request) {
   try {
-    // ── 1. Extract API Key ────────────────────────────────────────────────────
-    const authHeader = req.headers.get("authorization") ?? "";
-    const xApiKey = req.headers.get("x-api-key") ?? "";
-
-    let rawKey = "";
-    if (xApiKey.trim()) {
-      rawKey = xApiKey.trim();
-    } else if (authHeader.startsWith("Bearer ")) {
-      rawKey = authHeader.slice(7).trim();
-    } else if (authHeader && authHeader !== "anonymous") {
-      rawKey = authHeader.trim();
-    }
-
-    rawKey = rawKey.replace(/^[\"']/g, "").replace(/[\"']$/g, "").trim();
+    // ── 1. Extract API Key gracefully across headers & query params ──────────
+    const rawKey = extractApiKey(req);
 
     if (!rawKey) {
       return new Response(
@@ -164,13 +183,13 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 2. Authenticate — DB roundtrip #1 ─────────────────────────────────────
+    // ── 2. Web Crypto API SHA-256 Auth Lookup (DB roundtrip #1) ──────────────
     const keyHash = await sha256Hex(rawKey);
     const supabase = getEdgeSupabase();
 
     const { data: keyRecord, error: keyError } = await supabase
       .from("api_keys")
-      .select("id, user_id, is_active, budget_cap_usd, current_period_spend_usd, budget_action")
+      .select("id, user_id, project_id, is_active, budget_cap_usd, current_period_spend_usd, budget_action")
       .eq("key_hash", keyHash)
       .eq("is_active", true)
       .maybeSingle();
@@ -191,6 +210,8 @@ export async function POST(req: Request) {
     }
 
     const userId: string = String(keyRecord.user_id ?? "anonymous");
+    const apiKeyId: string = String(keyRecord.id);
+    const projectId: string | null = keyRecord.project_id ? String(keyRecord.project_id) : null;
 
     // ── 3. Parse + Validate Request Body ─────────────────────────────────────
     let body: IngestPayload;
@@ -228,7 +249,7 @@ export async function POST(req: Request) {
     const endUserId = body.end_user_id ? String(body.end_user_id) : null;
     const metadata = body.metadata ?? null;
 
-    // ── 4. Calculate Cost (static — no DB pricing lookup) ─────────────────────
+    // ── 4. Calculate Cost (static pricing — zero extra DB calls) ─────────────
     const { pricing, isEstimated } = lookupPricing(model);
     const totalCostUsd = Number(
       (promptTokens * pricing.input + completionTokens * pricing.output).toFixed(6)
@@ -248,10 +269,12 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 6. Insert into usage_logs — DB roundtrip #2 ───────────────────────────
+    // ── 6. Insert into usage_logs with user_id, project_id, api_key_id (DB roundtrip #2) ──
     const nowIso = new Date().toISOString();
     const logPayload: Record<string, unknown> = {
       user_id: userId,
+      api_key_id: apiKeyId,
+      ...(projectId   && { project_id: projectId }),
       provider: pricing.provider,
       model,
       input_tokens: promptTokens,
@@ -283,7 +306,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 7. Return 202 Accepted ────────────────────────────────────────────────
+    // ── 7. Return 202 Accepted with success: true, status: "ingested" ────────
     return new Response(
       JSON.stringify({
         success: true,
