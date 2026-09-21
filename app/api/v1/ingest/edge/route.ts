@@ -6,7 +6,7 @@
  * - Auth: Web Crypto SHA-256 with exact, prefix, and default fallback resolution
  * - DB: 2 roundtrips maximum (auth lookup + usage_logs insert)
  * - Pricing: Static embedded table for zero DB pricing lookups
- * - Schema: Strict usage_logs column mapping (input_tokens / output_tokens)
+ * - Schema: Strict usage_logs column mapping with prompt_version_id support
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -121,6 +121,9 @@ interface IngestPayload {
   output_tokens?: number;
   latency_ms?: number;
   session_id?: string;
+  prompt_version_id?: string;
+  prompt_slug?: string;
+  prompt_version?: string;
   metadata?: Record<string, unknown>;
   environment?: string;
   agent_name?: string;
@@ -277,11 +280,15 @@ export async function POST(req: Request) {
       );
     }
 
-    // Map prompt_tokens / input_tokens to inputTokens, completion_tokens / output_tokens to outputTokens
     const inputTokens = Math.max(0, Number(body.input_tokens ?? body.prompt_tokens ?? 0));
     const outputTokens = Math.max(0, Number(body.output_tokens ?? body.completion_tokens ?? 0));
     const latencyMs = Math.max(0, Number(body.latency_ms) || 0);
     const sessionId = body.session_id ? String(body.session_id) : null;
+    const promptVersionId = body.prompt_version_id
+      ? String(body.prompt_version_id)
+      : body.metadata?.prompt_version_id
+        ? String(body.metadata.prompt_version_id)
+        : null;
     const environment = body.environment
       ? String(body.environment)
       : body.metadata?.environment
@@ -316,11 +323,10 @@ export async function POST(req: Request) {
     }
 
     // ── 9. Insert usage metrics into usage_logs using verified schema columns ─
-    // Verified columns: user_id, project_id, model, provider, input_tokens, output_tokens, total_cost_usd, is_estimated, latency_ms, status_code, timestamp, created_at, session_id, environment, agent_name, end_user_id, metadata
     const nowIso = new Date().toISOString();
     const logPayload: Record<string, unknown> = {
       user_id: userId,
-      ...(projectId   && { project_id: projectId }),
+      ...(projectId       && { project_id: projectId }),
       model,
       provider: pricing.provider,
       input_tokens: inputTokens,
@@ -331,11 +337,12 @@ export async function POST(req: Request) {
       status_code: 200,
       timestamp: nowIso,
       created_at: nowIso,
-      ...(sessionId   && { session_id: sessionId }),
-      ...(environment && { environment }),
-      ...(agentName   && { agent_name: agentName }),
-      ...(endUserId   && { end_user_id: endUserId }),
-      ...(metadata    && { metadata }),
+      ...(promptVersionId && { prompt_version_id: promptVersionId }),
+      ...(sessionId       && { session_id: sessionId }),
+      ...(environment     && { environment }),
+      ...(agentName       && { agent_name: agentName }),
+      ...(endUserId       && { end_user_id: endUserId }),
+      ...(metadata        && { metadata }),
     };
 
     try {
@@ -371,6 +378,7 @@ export async function POST(req: Request) {
           provider: pricing.provider,
           calculated_cost: totalCostUsd,
           is_estimated: isEstimated,
+          ...(promptVersionId && { prompt_version_id: promptVersionId }),
         }),
         { status: 202, headers: { "Content-Type": "application/json", ...cors() } }
       );

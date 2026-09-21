@@ -574,6 +574,7 @@ export async function POST(req: NextRequest) {
       is_estimated: Boolean(body.is_estimated ?? false),
       ...(sessionIdTag && { session_id: sessionIdTag }),
       ...(agentTag && { agent_name: agentTag }),
+      ...(body.prompt_version_id && { prompt_version_id: String(body.prompt_version_id) }),
       ...(idempotencyKey && { idempotency_key: idempotencyKey }),
     };
 
@@ -695,3 +696,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+

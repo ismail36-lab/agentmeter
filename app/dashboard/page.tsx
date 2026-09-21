@@ -37,6 +37,7 @@ import { UsageTrendChart } from "@/components/charts/UsageTrendChart";
 import { ModelDistributionChart } from "@/components/charts/ModelDistributionChart";
 import { ApiKeyManagement } from "@/components/ApiKeyManagement";
 import { SessionRollups } from "@/components/SessionRollups";
+import { PromptVersionAnalytics } from "@/components/PromptVersionAnalytics";
 import { CustomerProfitability } from "@/components/CustomerProfitability";
 import { WebhookManagement } from "@/components/WebhookManagement";
 import { ProjectRetentionSettings } from "@/components/ProjectRetentionSettings";
@@ -986,77 +987,133 @@ export default function Dashboard() {
         </div>
 
         {/* ── Metric Cards Row ───────────────────────────────── */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
+        {(() => {
+          const hasDashboardData = metrics.totalRequests > 0;
+          return (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
+              {/* Total Spend */}
+              <div className="bento-card bento-card-hover p-5 w-full border border-zinc-800/80 bg-zinc-900/90 hover:border-zinc-700 transition-all duration-200">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-medium text-zinc-400 uppercase tracking-wider">Total Spend</span>
+                  <div className={`p-2 rounded-lg bg-zinc-950 border border-zinc-800 ${hasDashboardData ? "text-indigo-400" : "text-zinc-600"}`}>
+                    <DollarSign className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="mt-4 flex items-baseline justify-between">
+                  {hasDashboardData ? (
+                    <>
+                      <span className="text-2xl sm:text-3xl font-bold font-mono text-zinc-50 tracking-tight">
+                        ${metrics.totalSpend.toFixed(4)}
+                      </span>
+                      <span className="text-xs font-mono font-medium text-indigo-400 flex items-center gap-0.5">
+                        USD
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-2xl sm:text-3xl font-bold font-mono text-zinc-600 tracking-tight">
+                        --
+                      </span>
+                      <span className="text-[11px] font-mono text-zinc-500 bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800">
+                        No Data
+                      </span>
+                    </>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-zinc-500 font-sans">Real-time aggregate LLM cost</p>
+              </div>
 
-          {/* Total Spend */}
-          <div className="bento-card bento-card-hover p-5 w-full border border-zinc-800/80 bg-zinc-900/90 hover:border-zinc-700 transition-all duration-200">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-medium text-zinc-400 uppercase tracking-wider">Total Spend</span>
-              <div className="p-2 rounded-lg bg-zinc-950 text-indigo-400 border border-zinc-800">
-                <DollarSign className="h-4 w-4" />
+              {/* Total Tokens */}
+              <div className="bento-card bento-card-hover p-5 w-full border border-zinc-800/80 bg-zinc-900/90 hover:border-zinc-700 transition-all duration-200">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-medium text-zinc-400 uppercase tracking-wider">Total Tokens</span>
+                  <div className={`p-2 rounded-lg bg-zinc-950 border border-zinc-800 ${hasDashboardData ? "text-sky-400" : "text-zinc-600"}`}>
+                    <Cpu className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="mt-4 flex items-baseline justify-between">
+                  {hasDashboardData ? (
+                    <>
+                      <span className="text-2xl sm:text-3xl font-bold font-mono text-zinc-50 tracking-tight">
+                        {metrics.totalTokens.toLocaleString()}
+                      </span>
+                      <span className="text-xs font-mono font-medium text-sky-400">Tokens</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-2xl sm:text-3xl font-bold font-mono text-zinc-600 tracking-tight">
+                        --
+                      </span>
+                      <span className="text-[11px] font-mono text-zinc-500 bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800">
+                        No Data
+                      </span>
+                    </>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-zinc-500 font-sans">Prompt + completion tokens</p>
+              </div>
+
+              {/* API Ingestions */}
+              <div className="bento-card bento-card-hover p-5 w-full border border-zinc-800/80 bg-zinc-900/90 hover:border-zinc-700 transition-all duration-200">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-medium text-zinc-400 uppercase tracking-wider">API Ingestions</span>
+                  <div className={`p-2 rounded-lg bg-zinc-950 border border-zinc-800 ${hasDashboardData ? "text-violet-400" : "text-zinc-600"}`}>
+                    <Activity className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="mt-4 flex items-baseline justify-between">
+                  {hasDashboardData ? (
+                    <>
+                      <span className="text-2xl sm:text-3xl font-bold font-mono text-zinc-50 tracking-tight">
+                        {metrics.totalRequests}
+                      </span>
+                      <span className="text-xs font-mono font-medium text-violet-400">Logs</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-2xl sm:text-3xl font-bold font-mono text-zinc-600 tracking-tight">
+                        --
+                      </span>
+                      <span className="text-[11px] font-mono text-zinc-500 bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800">
+                        No Data
+                      </span>
+                    </>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-zinc-500 font-sans">Recorded telemetry logs</p>
+              </div>
+
+              {/* Top Model */}
+              <div className="bento-card bento-card-hover p-5 w-full border border-zinc-800/80 bg-zinc-900/90 hover:border-zinc-700 transition-all duration-200">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-medium text-zinc-400 uppercase tracking-wider">Top Model</span>
+                  <div className={`p-2 rounded-lg bg-zinc-950 border border-zinc-800 ${hasDashboardData ? "text-amber-400" : "text-zinc-600"}`}>
+                    <Zap className="h-4 w-4" />
+                  </div>
+                </div>
+                <div className="mt-4 flex items-baseline justify-between">
+                  {hasDashboardData ? (
+                    <span className="text-lg sm:text-xl font-bold font-mono text-zinc-50 truncate break-all block">
+                      {metrics.topModel}
+                    </span>
+                  ) : (
+                    <>
+                      <span className="text-2xl sm:text-3xl font-bold font-mono text-zinc-600 tracking-tight">
+                        --
+                      </span>
+                      <span className="text-[11px] font-mono text-zinc-500 bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800">
+                        No Data
+                      </span>
+                    </>
+                  )}
+                </div>
+                <p className="mt-2 text-xs text-zinc-500 font-sans">
+                  {hasDashboardData ? "Highest spend model" : "No telemetry logs recorded yet"}
+                </p>
               </div>
             </div>
-            <div className="mt-4 flex items-baseline justify-between">
-              <span className="text-2xl sm:text-3xl font-bold font-mono text-zinc-50 tracking-tight">
-                ${metrics.totalSpend.toFixed(4)}
-              </span>
-              <span className="text-xs font-mono font-medium text-indigo-400 flex items-center gap-0.5">
-                USD
-              </span>
-            </div>
-            <p className="mt-1 text-xs text-zinc-500 font-sans">Real-time aggregate LLM cost</p>
-          </div>
-
-          {/* Total Tokens */}
-          <div className="bento-card bento-card-hover p-5 w-full border border-zinc-800/80 bg-zinc-900/90 hover:border-zinc-700 transition-all duration-200">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-medium text-zinc-400 uppercase tracking-wider">Total Tokens</span>
-              <div className="p-2 rounded-lg bg-zinc-950 text-sky-400 border border-zinc-800">
-                <Cpu className="h-4 w-4" />
-              </div>
-            </div>
-            <div className="mt-4 flex items-baseline justify-between">
-              <span className="text-2xl sm:text-3xl font-bold font-mono text-zinc-50 tracking-tight">
-                {metrics.totalTokens.toLocaleString()}
-              </span>
-              <span className="text-xs font-mono font-medium text-sky-400">Tokens</span>
-            </div>
-            <p className="mt-1 text-xs text-zinc-500 font-sans">Prompt + completion tokens</p>
-          </div>
-
-          {/* API Ingestions */}
-          <div className="bento-card bento-card-hover p-5 w-full border border-zinc-800/80 bg-zinc-900/90 hover:border-zinc-700 transition-all duration-200">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-medium text-zinc-400 uppercase tracking-wider">API Ingestions</span>
-              <div className="p-2 rounded-lg bg-zinc-950 text-violet-400 border border-zinc-800">
-                <Activity className="h-4 w-4" />
-              </div>
-            </div>
-            <div className="mt-4 flex items-baseline justify-between">
-              <span className="text-2xl sm:text-3xl font-bold font-mono text-zinc-50 tracking-tight">
-                {metrics.totalRequests}
-              </span>
-              <span className="text-xs font-mono font-medium text-violet-400">Logs</span>
-            </div>
-            <p className="mt-1 text-xs text-zinc-500 font-sans">Recorded telemetry logs</p>
-          </div>
-
-          {/* Top Model */}
-          <div className="bento-card bento-card-hover p-5 w-full border border-zinc-800/80 bg-zinc-900/90 hover:border-zinc-700 transition-all duration-200">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-medium text-zinc-400 uppercase tracking-wider">Top Model</span>
-              <div className="p-2 rounded-lg bg-zinc-950 text-amber-400 border border-zinc-800">
-                <Zap className="h-4 w-4" />
-              </div>
-            </div>
-            <div className="mt-4">
-              <span className="text-lg sm:text-xl font-bold font-mono text-zinc-50 truncate break-all block">
-                {metrics.topModel}
-              </span>
-            </div>
-            <p className="mt-2 text-xs text-zinc-500 font-sans">Highest spend model</p>
-          </div>
-        </div>
+          );
+        })()}
 
         {/* ── Visual Charts Row ─────────────────────────────── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 w-full">
@@ -1064,7 +1121,11 @@ export default function Dashboard() {
             <UsageTrendChart data={dailyTrend} />
           </div>
           <div className="sm:col-span-2 lg:col-span-1 w-full">
-            <ModelDistributionChart data={modelBreakdown} totalSpend={metrics.totalSpend} />
+            <ModelDistributionChart
+              data={modelBreakdown}
+              totalSpend={metrics.totalSpend}
+              totalRecords={metrics.totalRequests}
+            />
           </div>
         </div>
 
@@ -1077,9 +1138,15 @@ export default function Dashboard() {
             <div>
               <div className="flex items-center gap-2">
                 <h4 className="text-sm font-semibold text-zinc-100 font-sans">Prompt Caching Intelligence</h4>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  {cachingMetrics.cacheHitRate}% CACHE HIT RATE
-                </span>
+                {metrics.totalRequests > 0 ? (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    {cachingMetrics.cacheHitRate}% CACHE HIT RATE
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold font-mono bg-zinc-800 text-zinc-500 border border-zinc-700/60">
+                    NO DATA
+                  </span>
+                )}
               </div>
               <p className="text-xs text-zinc-400 mt-0.5 font-sans">
                 Automatic prompt caching discounts applied to repetitive system prompts &amp; context headers
@@ -1089,11 +1156,15 @@ export default function Dashboard() {
           <div className="flex items-center gap-6 font-mono text-xs shrink-0 self-end sm:self-auto">
             <div>
               <span className="text-zinc-500 block text-[10px] uppercase">Cached Tokens</span>
-              <span className="text-zinc-100 font-bold">{cachingMetrics.totalCachedTokens.toLocaleString()}</span>
+              <span className={metrics.totalRequests > 0 ? "text-zinc-100 font-bold" : "text-zinc-600 font-bold"}>
+                {metrics.totalRequests > 0 ? cachingMetrics.totalCachedTokens.toLocaleString() : "--"}
+              </span>
             </div>
             <div>
               <span className="text-zinc-500 block text-[10px] uppercase">Cache Savings</span>
-              <span className="text-indigo-400 font-bold">${cachingMetrics.totalSavingsUSD.toFixed(4)}</span>
+              <span className={metrics.totalRequests > 0 ? "text-indigo-400 font-bold" : "text-zinc-600 font-bold"}>
+                {metrics.totalRequests > 0 ? `$${cachingMetrics.totalSavingsUSD.toFixed(4)}` : "--"}
+              </span>
             </div>
           </div>
         </div>
@@ -1272,6 +1343,9 @@ export default function Dashboard() {
 
         {/* ── Multi-Call Agent Session Rollups Bento View ───────── */}
         <SessionRollups />
+
+        {/* -- Prompt Version Registry & Unit Economics --------- */}
+        <PromptVersionAnalytics />
 
         {/* ── API Key Management Bento Card ─────────────────── */}
         <div id="api-key-management-section">
@@ -1656,3 +1730,5 @@ export default function Dashboard() {
     </div>
   );
 }
+
+
