@@ -6,6 +6,7 @@
  * - Auth: Web Crypto SHA-256 with exact, prefix, and default fallback resolution
  * - DB: 2 roundtrips maximum (auth lookup + usage_logs insert)
  * - Pricing: Static embedded table for zero DB pricing lookups
+ * - Schema: Strict usage_logs column mapping (input_tokens / output_tokens)
  */
 
 import { createClient } from "@supabase/supabase-js";
@@ -114,8 +115,10 @@ function lookupPricing(model: string): { pricing: PricingEntry; isEstimated: boo
 
 interface IngestPayload {
   model: string;
-  prompt_tokens: number;
-  completion_tokens: number;
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  input_tokens?: number;
+  output_tokens?: number;
   latency_ms?: number;
   session_id?: string;
   metadata?: Record<string, unknown>;
@@ -209,7 +212,7 @@ export async function POST(req: Request) {
       if (byRaw) keyRecord = byRaw;
     }
 
-    // C. Query by prefix match (check display_prefix or key/key_hash starting with token prefix)
+    // C. Query by prefix match
     if (!keyRecord && token.length >= 8) {
       const prefix = token.slice(0, 12);
       const { data: byPrefix } = await supabase
@@ -274,9 +277,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const promptTokens = Math.max(0, Number(body.prompt_tokens) || 0);
-    const completionTokens = Math.max(0, Number(body.completion_tokens) || 0);
-    const totalTokens = promptTokens + completionTokens;
+    // Map prompt_tokens / input_tokens to inputTokens, completion_tokens / output_tokens to outputTokens
+    const inputTokens = Math.max(0, Number(body.input_tokens ?? body.prompt_tokens ?? 0));
+    const outputTokens = Math.max(0, Number(body.output_tokens ?? body.completion_tokens ?? 0));
     const latencyMs = Math.max(0, Number(body.latency_ms) || 0);
     const sessionId = body.session_id ? String(body.session_id) : null;
     const environment = body.environment
@@ -295,7 +298,7 @@ export async function POST(req: Request) {
     // ── 7. Calculate Cost (static pricing — zero extra DB calls) ─────────────
     const { pricing, isEstimated } = lookupPricing(model);
     const totalCostUsd = Number(
-      (promptTokens * pricing.input + completionTokens * pricing.output).toFixed(6)
+      (inputTokens * pricing.input + outputTokens * pricing.output).toFixed(6)
     );
 
     // ── 8. Budget Guard ───────────────────────────────────────────────────────
@@ -312,19 +315,16 @@ export async function POST(req: Request) {
       );
     }
 
-    // ── 9. Insert usage metrics into usage_logs (DO NOT PASS api_key_id) ─────
+    // ── 9. Insert usage metrics into usage_logs using verified schema columns ─
+    // Verified columns: user_id, project_id, model, provider, input_tokens, output_tokens, total_cost_usd, is_estimated, latency_ms, status_code, timestamp, created_at, session_id, environment, agent_name, end_user_id, metadata
     const nowIso = new Date().toISOString();
     const logPayload: Record<string, unknown> = {
       user_id: userId,
       ...(projectId   && { project_id: projectId }),
       model,
       provider: pricing.provider,
-      prompt_tokens: promptTokens,
-      input_tokens: promptTokens,
-      completion_tokens: completionTokens,
-      output_tokens: completionTokens,
-      total_tokens: totalTokens,
-      cost: totalCostUsd,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
       total_cost_usd: totalCostUsd,
       is_estimated: isEstimated,
       latency_ms: latencyMs,
@@ -347,7 +347,7 @@ export async function POST(req: Request) {
 
       if (insertError) {
         console.error("[edge-ingest] Primary insert error:", insertError.message, insertError.details);
-        // Fallback without .select("id").single()
+        // Fallback insert without .select("id").single()
         const { error: fallbackError } = await supabase
           .from("usage_logs")
           .insert([logPayload]);
