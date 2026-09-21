@@ -3,7 +3,7 @@
  * POST /api/v1/ingest/edge
  *
  * - Runtime: Edge (Vercel/Cloudflare compatible)
- * - Auth: SHA-256 via Web Crypto API
+ * - Auth: SHA-256 via Web Crypto API with fallback raw key matching
  * - DB: 2 roundtrips maximum (auth lookup + usage_logs insert)
  * - Pricing: Static embedded table for zero DB pricing lookups
  */
@@ -41,6 +41,16 @@ function getEdgeSupabase() {
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+}
+
+// ── Web Crypto API SHA-256 ──────────────────────────────────────────────────
+
+async function sha256Hex(input: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 // ── Static Model Pricing Table ────────────────────────────────────────────────
@@ -118,16 +128,16 @@ interface IngestPayload {
 
 export async function POST(req: Request) {
   try {
-    // ── 1. Extract raw token from Authorization header (Bearer <key>) ────────
+    // ── 1. Extract token from Authorization header or direct key headers ─────
     const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
     let token = "";
 
     if (authHeader) {
       const bearerMatch = authHeader.match(/^bearer\s+(.+)$/i);
       if (bearerMatch && bearerMatch[1]) {
-        token = bearerMatch[1].trim();
+        token = bearerMatch[1];
       } else if (authHeader.trim().toLowerCase() !== "anonymous") {
-        token = authHeader.trim();
+        token = authHeader;
       }
     }
 
@@ -137,8 +147,8 @@ export async function POST(req: Request) {
         req.headers.get("api-key") ||
         req.headers.get("x-api-token") ||
         "";
-      if (xApiKey.trim()) {
-        token = xApiKey.trim();
+      if (xApiKey) {
+        token = xApiKey;
       }
     }
 
@@ -147,46 +157,64 @@ export async function POST(req: Request) {
         const url = new URL(req.url);
         const queryKey = url.searchParams.get("api_key") || url.searchParams.get("key");
         if (queryKey) {
-          token = queryKey.trim();
+          token = queryKey;
         }
       } catch {}
     }
 
+    // Strip whitespace & leading/trailing quotes
     token = token.replace(/^["']|["']$/g, "").trim();
+
+    console.log("[edge-auth] Extracted token:", token ? `${token.substring(0, 6)}... (len: ${token.length})` : "NONE");
 
     if (!token || token.includes("...")) {
       return new Response(
         JSON.stringify({
-          error: "Invalid or missing API key",
-          provided_token_length: token ? token.length : 0,
+          error: "Unauthorized",
+          extracted_token: token ? `${token.substring(0, 6)}...` : null,
+          token_length: token ? token.length : 0,
         }),
         { status: 401, headers: { "Content-Type": "application/json", ...cors() } }
       );
     }
 
-    // ── 2. Hash raw API key using SHA-256 (Web Crypto API) ───────────────────
-    const encoder = new TextEncoder();
-    const data = encoder.encode(token);
-    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-    const keyHash = Array.from(new Uint8Array(hashBuffer))
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("");
+    // ── 2. Compute SHA-256 hash via Web Crypto API ────────────────────────────
+    const keyHash = await sha256Hex(token);
+    console.log("[edge-auth] Computed SHA-256 key_hash:", keyHash);
 
-    // ── 3. Match keyHash against key_hash column in api_keys table ───────────
+    // ── 3. DB Lookup: Check sha256(token) == key_hash OR raw token == key ─────
     const supabase = getEdgeSupabase();
 
-    const { data: keyRecord, error: keyError } = await supabase
+    // Query by key_hash first
+    let { data: keyRecord, error: keyError } = await supabase
       .from("api_keys")
-      .select("id, user_id, project_id, is_active, budget_cap_usd, current_period_spend_usd, budget_action")
+      .select("id, user_id, project_id, key, key_hash, is_active, budget_cap_usd, current_period_spend_usd, budget_action")
       .eq("key_hash", keyHash)
       .eq("is_active", true)
       .maybeSingle();
 
+    // Fallback: If not found by key_hash, check if raw key matches `key` column directly
+    if (!keyRecord && !keyError) {
+      const { data: rawMatchKey } = await supabase
+        .from("api_keys")
+        .select("id, user_id, project_id, key, key_hash, is_active, budget_cap_usd, current_period_spend_usd, budget_action")
+        .eq("key", token)
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (rawMatchKey) {
+        keyRecord = rawMatchKey;
+      }
+    }
+
+    console.log("[edge-auth] Key lookup result:", keyRecord ? `FOUND (id: ${keyRecord.id}, user: ${keyRecord.user_id})` : `NOT FOUND (error: ${keyError?.message ?? "none"})`);
+
     if (keyError || !keyRecord) {
       return new Response(
         JSON.stringify({
-          error: "Invalid or missing API key",
-          provided_token_length: token ? token.length : 0,
+          error: "Unauthorized",
+          extracted_token: token ? `${token.substring(0, 6)}...` : null,
+          token_length: token ? token.length : 0,
         }),
         { status: 401, headers: { "Content-Type": "application/json", ...cors() } }
       );
