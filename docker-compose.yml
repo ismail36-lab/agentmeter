@@ -1,0 +1,126 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Meterix — Self-Hosted Docker Compose Stack
+#
+# Services
+#   meterix   – Next.js 14 application (port 3000)
+#   postgres  – Local PostgreSQL 15 instance (port 5432, internal only)
+#   migrate   – One-shot migration runner using psql
+#
+# Quick start:
+#   cp .env.example .env
+#   # fill in your values in .env
+#   docker compose up -d
+#
+# The `migrate` service runs all SQL files in ./supabase/migrations/ in
+# alphabetical order on every `up`. It exits cleanly once done, so it does
+# not consume resources at runtime.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── Application ─────────────────────────────────────────────────────────────
+  meterix:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: meterix_app
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # ── Supabase / Database ───────────────────────────────────────────────
+      # Set NEXT_PUBLIC_SUPABASE_URL to your Supabase project URL when using
+      # Supabase Cloud, OR to http://postgres:5432 for local Postgres.
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      DATABASE_URL: ${DATABASE_URL}
+
+      # ── App ──────────────────────────────────────────────────────────────
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      NODE_ENV: production
+      PORT: "3000"
+
+      # ── Email (Resend) ────────────────────────────────────────────────────
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-}
+
+      # ── Rate Limiting (Upstash) — optional ───────────────────────────────
+      UPSTASH_REDIS_REST_URL: ${UPSTASH_REDIS_REST_URL:-}
+      UPSTASH_REDIS_REST_TOKEN: ${UPSTASH_REDIS_REST_TOKEN:-}
+
+      # ── Billing (LemonSqueezy) — optional ────────────────────────────────
+      LEMONSQUEEZY_API_KEY: ${LEMONSQUEEZY_API_KEY:-}
+      LEMONSQUEEZY_STORE_ID: ${LEMONSQUEEZY_STORE_ID:-}
+      LEMONSQUEEZY_PRO_VARIANT_ID: ${LEMONSQUEEZY_PRO_VARIANT_ID:-}
+      LEMONSQUEEZY_WEBHOOK_SECRET: ${LEMONSQUEEZY_WEBHOOK_SECRET:-}
+
+      # ── Cron auth ─────────────────────────────────────────────────────────
+      CRON_SECRET: ${CRON_SECRET:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - meterix_net
+
+  # ── Local PostgreSQL (skip if using Supabase Cloud) ─────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: meterix_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-meterix}
+      POSTGRES_USER: ${POSTGRES_USER:-meterix}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-meterix_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # Expose only on localhost — do NOT expose 5432 publicly in production
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-meterix} -d ${POSTGRES_DB:-meterix}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - meterix_net
+
+  # ── Migration runner (one-shot) ──────────────────────────────────────────────
+  migrate:
+    image: postgres:15-alpine
+    container_name: meterix_migrate
+    restart: "no"
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-meterix_password}
+    volumes:
+      - ./supabase/migrations:/migrations:ro
+    # Run each *.sql migration file in alphabetical order
+    entrypoint: >
+      sh -c '
+        echo "[migrate] Waiting for Postgres to be ready...";
+        until pg_isready -h postgres -U ${POSTGRES_USER:-meterix} -d ${POSTGRES_DB:-meterix}; do
+          sleep 1;
+        done;
+        echo "[migrate] Postgres ready. Running migrations...";
+        for f in $(ls /migrations/*.sql | sort); do
+          echo "[migrate] Applying $$f...";
+          psql -h postgres -U ${POSTGRES_USER:-meterix} -d ${POSTGRES_DB:-meterix} -f "$$f" || exit 1;
+        done;
+        echo "[migrate] All migrations applied successfully.";
+      '
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - meterix_net
+
+# ─── Volumes ──────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+    driver: local
+
+# ─── Networks ─────────────────────────────────────────────────────────────────
+networks:
+  meterix_net:
+    driver: bridge
