@@ -98,35 +98,42 @@ export async function POST(req: Request) {
     const outputTokens = body.output_tokens || body.completion_tokens || 0;
     const cost = body.cost || 0;
 
-    // Insert into usage_logs
-    const insertPayload: Record<string, any> = {
+    // Insert into usage_logs with resilient cost column mapping
+    const basePayload: Record<string, any> = {
       user_id: userId,
       model: model,
       prompt_version_id: promptVersionId,
       input_tokens: inputTokens,
       output_tokens: outputTokens,
-      cost: cost,
       created_at: new Date().toISOString(),
     };
 
+    // Primary insert payload using total_cost_usd (standard column name in schema)
     let { error: insertErr } = await supabase
       .from("usage_logs")
-      .insert([insertPayload]);
+      .insert([{ ...basePayload, total_cost_usd: cost }]);
 
     if (insertErr) {
-      // Fallback: retry with total_cost_usd in case live schema column varies
-      const { error: fallbackErr } = await supabase
+      // Fallback 1: retry with total_cost column name
+      const { error: fallbackErr1 } = await supabase
         .from("usage_logs")
-        .insert([{
-          ...insertPayload,
-          total_cost_usd: cost,
-        }]);
+        .insert([{ ...basePayload, total_cost: cost }]);
 
-      if (fallbackErr) {
-        return new Response(
-          JSON.stringify({ error: "Database Insert Error", details: insertErr.message }),
-          { status: 500, headers: { "Content-Type": "application/json" } }
-        );
+      if (fallbackErr1) {
+        // Fallback 2: retry with cost column name
+        const { error: fallbackErr2 } = await supabase
+          .from("usage_logs")
+          .insert([{ ...basePayload, cost: cost }]);
+
+        if (fallbackErr2) {
+          return new Response(
+            JSON.stringify({
+              error: "Database Insert Error",
+              details: insertErr.message || fallbackErr1.message || fallbackErr2.message,
+            }),
+            { status: 500, headers: { "Content-Type": "application/json" } }
+          );
+        }
       }
     }
 
