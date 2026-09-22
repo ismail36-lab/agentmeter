@@ -98,9 +98,25 @@ export async function POST(req: Request) {
     const outputTokens = body.output_tokens || body.completion_tokens || 0;
     const cost = body.cost || 0;
 
+    // Extract or infer provider (provider column is NOT NULL in usage_logs schema)
+    let provider = (body.provider || "").toString().trim().toLowerCase();
+    if (!provider) {
+      const m = (model || "").toLowerCase().trim();
+      if (m.startsWith("gpt") || m.startsWith("o1") || m.startsWith("o3")) {
+        provider = "openai";
+      } else if (m.startsWith("claude")) {
+        provider = "anthropic";
+      } else if (m.startsWith("gemini")) {
+        provider = "google";
+      } else {
+        provider = "openai";
+      }
+    }
+
     // Insert into usage_logs with resilient cost column mapping
     const basePayload: Record<string, any> = {
       user_id: userId,
+      provider: provider,
       model: model,
       prompt_version_id: promptVersionId,
       input_tokens: inputTokens,
