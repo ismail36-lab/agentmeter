@@ -1,8 +1,35 @@
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
+import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
+
+async function hashToken(token: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(token);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function getDbClient() {
+  try {
+    if (supabaseAdmin) return supabaseAdmin;
+  } catch {}
+
+  const url =
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    process.env.SUPABASE_URL ||
+    "https://placeholder.supabase.co";
+  const key =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+    process.env.SUPABASE_ANON_KEY ||
+    "";
+  return createClient(url, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 export async function OPTIONS() {
   return NextResponse.json(
@@ -38,14 +65,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 2. Compute SHA-256 hash of incoming raw token
-    const tokenHash = crypto.createHash("sha256").update(rawToken).digest("hex");
+    // 2. Compute SHA-256 hash using native Web Crypto API
+    const computedHash = await hashToken(rawToken);
 
-    // 3. Query Supabase api_keys table using supabaseAdmin for key_hash = tokenHash
-    const { data: keyByHash } = await supabaseAdmin
+    // 3. Query Supabase api_keys table using supabaseAdmin / db client
+    const client = getDbClient();
+
+    const { data: keyByHash } = await client
       .from("api_keys")
       .select("*")
-      .eq("key_hash", tokenHash)
+      .eq("key_hash", computedHash)
       .maybeSingle();
 
     let keyRow = keyByHash;
@@ -53,7 +82,7 @@ export async function POST(req: NextRequest) {
     // 4. Fallback Authentication Path
     if (!keyRow) {
       const prefix = rawToken.substring(0, 10);
-      const { data: keyByFallback } = await supabaseAdmin
+      const { data: keyByFallback } = await client
         .from("api_keys")
         .select("*")
         .or(`key.eq.${rawToken},display_prefix.eq.${prefix}`)
@@ -64,7 +93,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!keyRow) {
+    const userId = keyRow?.user_id;
+
+    if (!keyRow || !userId) {
       console.error("[edge-auth-failure] Key lookup failed for prefix:", rawToken.substring(0, 8));
       return NextResponse.json(
         { error: "Unauthorized: Invalid API key" },
@@ -72,10 +103,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 5. Extract user_id from authenticated key row
-    const user_id = keyRow.user_id;
-
-    // 6. Parse JSON request body and extract fields
+    // 5. Parse JSON request body
     const body = await req.json().catch(() => ({}));
 
     const model = body.model || "unknown";
@@ -84,11 +112,11 @@ export async function POST(req: NextRequest) {
     const output_tokens = body.output_tokens ?? body.completion_tokens ?? 0;
     const cost = body.cost ?? 0;
 
-    // 7. Insert new record into usage_logs table
+    // 6. Insert new record into usage_logs table
     const created_at = new Date().toISOString();
 
     const insertRecord: Record<string, any> = {
-      user_id,
+      user_id: userId,
       model,
       prompt_version_id,
       input_tokens,
@@ -97,13 +125,13 @@ export async function POST(req: NextRequest) {
       created_at,
     };
 
-    let { error: insertError } = await supabaseAdmin
+    let { error: insertError } = await client
       .from("usage_logs")
       .insert(insertRecord);
 
     if (insertError) {
-      // Fallback in case table column names vary in live Postgres schema
-      const { error: fallbackError } = await supabaseAdmin
+      // Fallback: In case live Postgres schema uses total_cost_usd instead of cost
+      const { error: fallbackError } = await client
         .from("usage_logs")
         .insert({
           ...insertRecord,
@@ -117,26 +145,26 @@ export async function POST(req: NextRequest) {
           fallbackError.message
         );
         return NextResponse.json(
-          { error: `Database insert failed: ${insertError.message}` },
+          { error: "Internal Server Error", details: `Database insert failed: ${insertError.message}` },
           { status: 500 }
         );
       }
     }
 
-    // 8. Return HTTP 200 with success, user_id, prompt_version_id, logged: true
+    // 7. Return HTTP 200 with success, user_id, prompt_version_id, logged: true
     return NextResponse.json(
       {
         success: true,
-        user_id,
+        user_id: userId,
         prompt_version_id,
         logged: true,
       },
       { status: 200 }
     );
-  } catch (error: any) {
-    console.error("[edge-ingest-error] Unhandled error:", error);
+  } catch (err: any) {
+    console.error("[edge-ingest-error] Unhandled server error:", err);
     return NextResponse.json(
-      { error: error?.message || "Internal Server Error" },
+      { error: "Internal Server Error", details: err?.message || String(err) },
       { status: 500 }
     );
   }
