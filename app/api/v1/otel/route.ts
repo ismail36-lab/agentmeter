@@ -3,6 +3,8 @@ import { supabaseAdmin } from "@/lib/supabase/admin";
 import { verifyApiKey } from "@/lib/auth/meterix";
 import { parseOtelSpans, MappedOtelSpan } from "@/lib/otel-adapter";
 import { getCacheReadMultiplier } from "@/lib/pricing";
+import { checkRateLimitAsync } from "@/lib/rate-limiter";
+import { checkMonthlyQuota } from "@/lib/quota";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +59,89 @@ export async function POST(req: NextRequest) {
     const keyRecord = authResult.apiKeyRecord;
     const userId = authResult.userId || keyRecord.user_id || "anonymous";
 
-    // ── 3. Parse OTLP JSON Body safely ──
+    // Resolve plan from public.profiles (single source of truth)
+    let userPlan = "free";
+    if (userId && userId !== "anonymous") {
+      try {
+        const { data: profile } = await supabaseAdmin
+          .from("profiles")
+          .select("plan")
+          .eq("id", userId)
+          .maybeSingle();
+
+        if (profile?.plan) {
+          userPlan = String(profile.plan).toLowerCase();
+        }
+      } catch (err) {
+        console.warn("[otel-route] Could not fetch plan:", err);
+      }
+    }
+
+    // ── 3. Post-Authentication Rate Limit Check ──────────────────────────────
+    const rateLimitIdentifier = `telemetry:${keyRecord.id || userId}`;
+    const rateLimitResult = await checkRateLimitAsync(rateLimitIdentifier, userPlan);
+
+    if (!rateLimitResult.allowed) {
+      const retryAfterSec = Math.ceil((rateLimitResult.retryAfterMs || 60000) / 1000);
+      return NextResponse.json(
+        { error: "Too Many Requests", message: "Rate limit exceeded." },
+        {
+          status: 429,
+          headers: {
+            ...getCorsHeaders(),
+            "Retry-After": String(retryAfterSec),
+            "X-RateLimit-Limit": String(rateLimitResult.limit),
+            "X-RateLimit-Remaining": String(Math.max(0, rateLimitResult.remaining)),
+            "X-RateLimit-Reset": String(Math.ceil((Date.now() + (rateLimitResult.retryAfterMs || 60000)) / 1000)),
+          },
+        }
+      );
+    }
+
+    // ── 4. Monthly Quota Limit Enforcement ──────────────────────────────────
+    const quotaResult = await checkMonthlyQuota(userId, userPlan);
+    if (!quotaResult.allowed) {
+      return NextResponse.json(
+        {
+          error: "Monthly log limit reached",
+          message: `Monthly limit of ${quotaResult.monthlyLimit.toLocaleString()} logs reached for ${userPlan} plan. Resets at the start of next month.`,
+          plan: userPlan,
+          usage: quotaResult.currentCount,
+          limit: quotaResult.monthlyLimit,
+        },
+        { status: 429, headers: getCorsHeaders() }
+      );
+    }
+
+    // ── 5. Budget Cap Circuit Breaker Check ──────────────────────────────────
+    const maxBudget = keyRecord.max_budget_usd !== null && keyRecord.max_budget_usd !== undefined
+      ? Number(keyRecord.max_budget_usd)
+      : (keyRecord.budget_cap_usd !== null && keyRecord.budget_cap_usd !== undefined
+        ? Number(keyRecord.budget_cap_usd)
+        : null);
+    const currentSpend = Number(keyRecord.current_period_spend_usd ?? 0);
+    const budgetAction = String(keyRecord.budget_action || keyRecord.budget_cap_action || "block_new_logs").toLowerCase();
+
+    if (maxBudget !== null && maxBudget > 0 && currentSpend >= maxBudget) {
+      if (budgetAction === "revoke_key") {
+        await supabaseAdmin
+          .from("api_keys")
+          .update({ is_active: false, status: "suspended" })
+          .eq("id", keyRecord.id);
+
+        return NextResponse.json(
+          { error: "Budget cap exceeded: API key has been suspended", action: "revoke_key" },
+          { status: 403, headers: getCorsHeaders() }
+        );
+      } else if (budgetAction !== "alert_only") {
+        return NextResponse.json(
+          { error: "Budget cap exceeded", action: "block_new_logs" },
+          { status: 402, headers: getCorsHeaders() }
+        );
+      }
+    }
+
+    // ── 6. Parse OTLP JSON Body safely ─────────────────────────────────────
     const body = await req.json().catch((jsonErr) => {
       console.warn("[otel-route] Invalid or empty JSON body received:", jsonErr);
       return {};
@@ -76,7 +160,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({}, { status: 200, headers: getCorsHeaders() });
     }
 
-    // ── 4. Process and Ingest Mapped Spans into usage_logs ──
+    // ── 7. Process and Ingest Mapped Spans into usage_logs ─────────────────
     const insertRows: Record<string, any>[] = [];
 
     for (const span of mappedSpans) {
@@ -157,9 +241,21 @@ export async function POST(req: NextRequest) {
           { status: 500, headers: getCorsHeaders() }
         );
       }
+
+      // Update API Key current_period_spend_usd
+      if (keyRecord?.id) {
+        const totalBatchCost = insertRows.reduce((acc, r) => acc + Number(r.total_cost_usd || 0), 0);
+        if (totalBatchCost > 0) {
+          const newSpend = Number((currentSpend + totalBatchCost).toFixed(6));
+          await supabaseAdmin
+            .from("api_keys")
+            .update({ current_period_spend_usd: newSpend })
+            .eq("id", keyRecord.id);
+        }
+      }
     }
 
-    // ── 5. Return OTLP-compliant success response ({}) with HTTP 200 ──
+    // ── 8. Return OTLP-compliant success response ({}) with HTTP 200 ──────
     return NextResponse.json({}, { status: 200, headers: getCorsHeaders() });
   } catch (error: any) {
     const errorMessage = error?.message || String(error) || "Internal Server Error";
@@ -170,3 +266,4 @@ export async function POST(req: NextRequest) {
     );
   }
 }
+

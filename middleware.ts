@@ -18,7 +18,7 @@ import { NextResponse, type NextRequest } from "next/server";
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Routes that are subject to API-key rate limiting */
-const RATE_LIMITED_PATHS = ["/api/v1/ingest", "/api/v1/telemetry"];
+const RATE_LIMITED_PATHS = ["/api/v1/ingest", "/api/v1/telemetry", "/api/v1/otel"];
 
 /** Blanket edge cap — matches the Pro plan ceiling to avoid false-positives */
 const EDGE_RATE_LIMIT = 1_000;
