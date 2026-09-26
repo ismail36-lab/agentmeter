@@ -113,14 +113,16 @@ export async function dispatchWebhookAlert(payload: WebhookEventPayload): Promis
   let failed = 0;
 
   try {
-    // 1. Fetch active webhooks from DB
-    let query = supabaseAdmin.from("webhook_configs").select("*").eq("is_active", true);
-
-    if (payload.userId) {
-      query = query.or(`user_id.eq.${payload.userId},user_id.is.null`);
+    if (!payload.userId) {
+      return { dispatched: 0, failed: 0 };
     }
 
-    const { data: configs, error } = await query;
+    // 1. Fetch active webhooks from DB strictly filtered for the user/tenant
+    const { data: configs, error } = await supabaseAdmin
+      .from("webhook_configs")
+      .select("*")
+      .eq("is_active", true)
+      .eq("user_id", payload.userId);
     if (error || !configs || configs.length === 0) {
       return { dispatched: 0, failed: 0 };
     }
