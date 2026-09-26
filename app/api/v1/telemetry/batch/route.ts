@@ -7,6 +7,7 @@ import crypto from "crypto";
 import { sendBudgetAlert } from "@/lib/budget-alerts";
 import { sendAnomalyAlert } from "@/lib/anomaly-alerts";
 import { checkMonthlyQuota } from "@/lib/quota";
+import { checkRateLimitAsync } from "@/lib/rate-limiter";
 
 export const dynamic = "force-dynamic";
 
@@ -364,9 +365,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: authError }, { status: 401, headers: getCorsHeaders() });
     }
 
-    // 3. Monthly Quota Enforcement
+    const plan = userId ? await getUserPlan(userId) : "free";
+
+    // 3. Post-Authentication Plan-Based Rate Limit Check (BEFORE monthly quota check)
+    const rateLimitIdentifier = `telemetry:${apiKeyRecord?.id || userId || "anonymous"}`;
+    const rateLimitResult = await checkRateLimitAsync(rateLimitIdentifier, plan);
+
+    if (!rateLimitResult.allowed || rateLimitResult.success === false) {
+      const retryAfterSec = Math.ceil((rateLimitResult.retryAfterMs || 60000) / 1000);
+      return NextResponse.json(
+        { error: "Too Many Requests", message: "Rate limit exceeded." },
+        {
+          status: 429,
+          headers: {
+            ...getCorsHeaders(),
+            "Retry-After": String(retryAfterSec),
+            "X-RateLimit-Limit": String(rateLimitResult.limit),
+            "X-RateLimit-Remaining": String(Math.max(0, rateLimitResult.remaining)),
+            "X-RateLimit-Reset": String(Math.ceil((Date.now() + (rateLimitResult.retryAfterMs || 60000)) / 1000)),
+          },
+        }
+      );
+    }
+
+    // 4. Monthly Quota Enforcement
     if (userId) {
-      const plan = await getUserPlan(userId);
       const quotaResult = await checkMonthlyQuota(userId, plan);
       if (!quotaResult.allowed) {
         return NextResponse.json(
