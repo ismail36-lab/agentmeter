@@ -30,12 +30,16 @@ export async function verifyApiKey(rawKey: string): Promise<VerifyApiKeyResult> 
   const cleanKey = (rawKey || "").replace(/^["']|["']$/g, "").trim();
 
   if (!cleanKey) {
-    console.log("[telemetry-auth] Verification failed: Missing API Key in request headers");
+    if (process.env.DEBUG_AUTH === "true") {
+      console.log("[telemetry-auth] Verification failed: Missing API Key in request headers");
+    }
     return { success: false, error: "Unauthorized: Missing API Key" };
   }
 
   if (cleanKey.includes("...")) {
-    console.log("[telemetry-auth] Verification failed: Truncated masked placeholder received:", cleanKey);
+    if (process.env.DEBUG_AUTH === "true") {
+      console.log("[telemetry-auth] Verification failed: Truncated masked placeholder received:", cleanKey);
+    }
     return {
       success: false,
       error: "Unauthorized: Invalid API Key — received a masked placeholder instead of the full secret key.",
@@ -47,8 +51,10 @@ export async function verifyApiKey(rawKey: string): Promise<VerifyApiKeyResult> 
   const prefix = cleanKey.slice(0, 12);
 
   // Debug log statements for local debugging
-  console.log(`[telemetry-auth] Incoming raw key prefix: ${prefix}...`);
-  console.log(`[telemetry-auth] Calculated SHA-256 hash: ${computedHash}`);
+  if (process.env.DEBUG_AUTH === "true") {
+    console.log(`[telemetry-auth] Incoming raw key prefix: ${prefix}...`);
+    console.log(`[telemetry-auth] Calculated SHA-256 hash: ${computedHash}`);
+  }
 
   // Database lookup: SELECT * FROM api_keys WHERE key_hash = <computed_hash> AND is_active = true
   const { data, error } = await supabaseAdmin
@@ -64,11 +70,15 @@ export async function verifyApiKey(rawKey: string): Promise<VerifyApiKeyResult> 
   }
 
   if (!data) {
-    console.log(`[telemetry-auth] Match result: NOT FOUND in DB (key_hash: ${computedHash})`);
+    if (process.env.DEBUG_AUTH === "true") {
+      console.log(`[telemetry-auth] Match result: NOT FOUND in DB (key_hash: ${computedHash})`);
+    }
     return { success: false, error: "Unauthorized: Invalid API Key" };
   }
 
-  console.log(`[telemetry-auth] Match result: SUCCESSFUL MATCH FOUND for key ID ${data.id} (user: ${data.user_id})`);
+  if (process.env.DEBUG_AUTH === "true") {
+    console.log(`[telemetry-auth] Match result: SUCCESSFUL MATCH FOUND for key ID ${data.id} (user: ${data.user_id})`);
+  }
 
   return {
     success: true,
