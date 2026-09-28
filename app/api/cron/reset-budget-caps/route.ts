@@ -13,23 +13,32 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleResetBudgetCaps(req: NextRequest) {
-  try {
-    const cronSecret = process.env.CRON_SECRET;
-    const authHeader = req.headers.get("authorization");
-    const xCronSecret = req.headers.get("x-cron-secret");
-    const { searchParams } = new URL(req.url);
-    const paramSecret = searchParams.get("secret") || searchParams.get("cron_secret");
+  const cronSecret = process.env.CRON_SECRET;
+  const authHeader = req.headers.get("authorization");
+  const xCronSecret = req.headers.get("x-cron-secret");
+  const { searchParams } = new URL(req.url);
+  const paramSecret = searchParams.get("secret") || searchParams.get("cron_secret");
 
+  if (!cronSecret) {
+    if (process.env.NODE_ENV !== "development") {
+      return NextResponse.json(
+        { error: "CRON_SECRET environment variable missing on server" },
+        { status: 500 }
+      );
+    }
+  } else {
     const isAuthorized =
-      Boolean(cronSecret) &&
-      (authHeader === `Bearer ${cronSecret}` ||
-        xCronSecret === cronSecret ||
-        paramSecret === cronSecret);
+      authHeader === `Bearer ${cronSecret}` ||
+      authHeader === cronSecret ||
+      xCronSecret === cronSecret ||
+      paramSecret === cronSecret;
 
     if (!isAuthorized) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+  }
 
+  try {
     const supabaseUrl =
       process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
     const serviceKey =
@@ -44,29 +53,25 @@ async function handleResetBudgetCaps(req: NextRequest) {
       },
     });
 
-    const { data, error: updateError } = await supabase
+    const { data, error } = await supabase
       .from("api_keys")
-      .update({
-        current_period_spend_usd: 0,
-        budget_alert_sent: false,
-      })
-      .not("id", "is", null)
-      .select("id");
+      .update({ current_period_spend_usd: 0, budget_alert_sent: false })
+      .neq("id", "00000000-0000-0000-0000-000000000000")
+      .select();
 
-    if (updateError) {
-      console.error("Cron reset error:", updateError);
+    if (error) {
+      console.error("Supabase db error during reset:", error);
       return NextResponse.json(
-        { success: false, error: updateError.message },
+        { success: false, db_error: error },
         { status: 500 }
       );
     }
 
-    const keysReset = data ? data.length : 0;
-
     return NextResponse.json(
       {
         success: true,
-        keys_reset: keysReset,
+        message: "Reset completed",
+        updated: data,
       },
       {
         status: 200,
@@ -75,10 +80,10 @@ async function handleResetBudgetCaps(req: NextRequest) {
         },
       }
     );
-  } catch (error: any) {
-    console.error("Cron reset error:", error);
+  } catch (err: any) {
+    console.error("Cron reset error:", err);
     return NextResponse.json(
-      { success: false, error: error?.message ?? String(error) },
+      { success: false, error: err?.message ?? String(err) },
       { status: 500 }
     );
   }
