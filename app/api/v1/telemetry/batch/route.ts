@@ -197,6 +197,7 @@ interface BatchEvent {
 interface EventResult {
   index: number;
   success: boolean;
+  idempotent_replay?: boolean;
   log_id?: string;
   model?: string;
   calculated_cost?: number;
@@ -311,6 +312,32 @@ async function processEvent(
       .single();
 
     if (logError) {
+      const isUniqueViolation = logError?.code === "23505" || logError?.message?.includes("23505") || logError?.details?.includes("23505");
+      const keyToQuery = (logPayload as any)?.idempotency_key;
+
+      if (isUniqueViolation && keyToQuery) {
+        try {
+          const { data: existingLog } = await supabaseAdmin
+            .from("usage_logs")
+            .select("*")
+            .eq("idempotency_key", keyToQuery)
+            .maybeSingle();
+
+          if (existingLog) {
+            return {
+              index,
+              success: true,
+              idempotent_replay: true,
+              log_id: existingLog.id,
+              model: existingLog.model || modelKey,
+              calculated_cost: Number(existingLog.total_cost_usd ?? existingLog.cost_usd ?? roundedCost),
+              is_estimated: Boolean(existingLog.is_estimated ?? isEstimated),
+              ...(warning && { warning }),
+            };
+          }
+        } catch {/* silent */}
+      }
+
       // Fallback: telemetry_logs
       try {
         const { data: tData } = await supabaseAdmin
@@ -490,10 +517,17 @@ export async function POST(req: NextRequest) {
           );
         } else if (action === "alert_only") {
           budgetWarning = "Budget cap exceeded for this API key";
-          await supabaseAdmin
-            .from("api_keys")
-            .update({ current_period_spend_usd: newSpend })
-            .eq("id", apiKeyRecord.id);
+          try {
+            const { error: rpcErr } = await supabaseAdmin.rpc("increment_key_spend", {
+              key_id: apiKeyRecord.id,
+              amount: totalBatchSpend,
+            });
+            if (rpcErr) {
+              console.warn("[batch-telemetry] increment_key_spend RPC error:", rpcErr.message);
+            }
+          } catch (rpcErr) {
+            console.warn("[batch-telemetry] increment_key_spend RPC exception:", rpcErr);
+          }
         } else {
           // Default: 'block_new_logs'
           return NextResponse.json(
@@ -531,10 +565,17 @@ export async function POST(req: NextRequest) {
           })().catch((err) => console.error("[budget-alerts] Non-blocking warning email dispatch error:", err));
         }
 
-        await supabaseAdmin
-          .from("api_keys")
-          .update({ current_period_spend_usd: newSpend })
-          .eq("id", apiKeyRecord.id);
+        try {
+          const { error: rpcErr } = await supabaseAdmin.rpc("increment_key_spend", {
+            key_id: apiKeyRecord.id,
+            amount: totalBatchSpend,
+          });
+          if (rpcErr) {
+            console.warn("[batch-telemetry] increment_key_spend RPC error:", rpcErr.message);
+          }
+        } catch (rpcErr) {
+          console.warn("[batch-telemetry] increment_key_spend RPC exception:", rpcErr);
+        }
       }
     }
 

@@ -630,12 +630,15 @@ export async function POST(req: NextRequest) {
 
     logData = insertedData;
 
-    if (logError && idempotencyKey) {
+    const isUniqueViolation = logError?.code === "23505" || logError?.message?.includes("23505") || logError?.details?.includes("23505");
+    const keyToQuery = idempotencyKey || (safeInsertPayload as any)?.idempotency_key;
+
+    if (logError && (idempotencyKey || isUniqueViolation) && keyToQuery) {
       try {
         const { data: existingLog } = await supabaseAdmin
           .from("usage_logs")
           .select("*")
-          .eq("idempotency_key", idempotencyKey)
+          .eq("idempotency_key", keyToQuery)
           .maybeSingle();
 
         if (existingLog) {
