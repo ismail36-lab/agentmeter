@@ -79,16 +79,6 @@ async function getUserPlan(userId: string): Promise<string> {
   return "free";
 }
 
-async function getTotalLogCount(userId: string | null): Promise<number> {
-  try {
-    let q = supabaseAdmin.from("usage_logs").select("id", { count: "exact", head: true });
-    if (userId) q = q.eq("user_id", userId);
-    const { count } = await q;
-    return count ?? 0;
-  } catch {
-    return 0;
-  }
-}
 
 // ── Pricing lookup helper (mirrors single telemetry route) ────────────────────
 async function resolveModelPricing(
