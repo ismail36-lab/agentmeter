@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
         } else {
           // Fallback synthetic key if user has no keys in DB yet
           apiKeyRecord = {
-            id: requestedKeyId || "internal-tester",
+            id: requestedKeyId || `internal-tester:${userId}`,
             user_id: userId,
             name: "Dashboard Tester",
             is_active: true,
