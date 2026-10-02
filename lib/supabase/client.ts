@@ -81,3 +81,5 @@ export const createClient = createBrowserClient;
  * `import { supabase } from "@/lib/supabase"`
  */
 export const supabase = createBrowserClient();
+
+export default supabase;
