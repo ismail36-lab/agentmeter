@@ -9,6 +9,12 @@ import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 
+const ROLE_RANK: Record<string, number> = {
+  member: 1,
+  admin: 2,
+  owner: 3,
+};
+
 export interface InviteRequestBody {
   email: string;
   role?: Role;
@@ -33,7 +39,7 @@ export interface InviteSuccessResponse {
 }
 
 export interface InviteErrorResponse {
-  success: false;
+  success?: false;
   error: string;
   details?: string;
 }
@@ -118,6 +124,17 @@ export async function POST(req: NextRequest): Promise<NextResponse<InviteRespons
           error: "Forbidden",
           details: authResult.reason || "Only admins and owners can issue team invitations",
         },
+        { status: 403, headers: getCorsHeaders() }
+      );
+    }
+
+    // Resolve caller and invited roles for ceiling check
+    const callerRole = authResult.role || "member";
+    const invitedRole = targetRole;
+
+    if ((ROLE_RANK[invitedRole] ?? 0) > (ROLE_RANK[callerRole] ?? 0)) {
+      return NextResponse.json(
+        { error: "Cannot invite a user with a higher role than your own." },
         { status: 403, headers: getCorsHeaders() }
       );
     }
