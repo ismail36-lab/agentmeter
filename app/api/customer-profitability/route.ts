@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { calculateSingleCustomerMargin, CustomerMarginItem } from "@/lib/customer-profitability";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -32,43 +33,25 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const cronSecret = process.env.CRON_SECRET;
-    let customersData: any[] = [];
+    let customersData: CustomerMarginItem[] = [];
 
-    // Internal fetch to stripe-sync with valid CRON_SECRET header
-    if (cronSecret) {
-      try {
-        const origin = req.nextUrl.origin;
-        const syncRes = await fetch(`${origin}/api/v1/cron/stripe-sync`, {
-          headers: {
-            Authorization: `Bearer ${cronSecret}`,
-            "Cache-Control": "no-cache",
-          },
-          cache: "no-store",
-        });
-
-        if (syncRes.ok) {
-          const syncJson = await syncRes.json();
-          customersData = syncJson.customers || [];
-        }
-      } catch (err) {
-        console.warn("[customer-profitability] internal stripe-sync fetch notice:", err);
-      }
-    }
-
-    // Fallback DB query scoped strictly to the authenticated user.id
-    if (customersData.length === 0) {
+    // Calculate customer profitability strictly for the authenticated user context
+    try {
+      const singleMargin = await calculateSingleCustomerMargin(user.id, user.email);
+      customersData = [singleMargin];
+    } catch (calcErr) {
+      console.warn("[customer-profitability] Single user calculation notice, falling back to DB query:", calcErr);
       const { data: dbRows } = await supabaseAdmin
         .from("customer_margins")
         .select("*")
         .eq("user_id", user.id)
         .order("margin", { ascending: true });
 
-      customersData = dbRows || [];
+      customersData = (dbRows as CustomerMarginItem[]) || [];
     }
 
     // Ensure returned items belong exclusively to the authenticated user
-    const scopedCustomers = customersData.filter((c: any) => c.user_id === user.id);
+    const scopedCustomers = customersData.filter((c: CustomerMarginItem) => c.user_id === user.id);
 
     return NextResponse.json(
       { success: true, customers: scopedCustomers },
