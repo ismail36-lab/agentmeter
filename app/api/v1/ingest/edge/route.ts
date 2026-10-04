@@ -527,10 +527,17 @@ export async function POST(req: NextRequest) {
           );
         } else if (budgetAction === "alert_only") {
           budgetWarning = "Budget cap exceeded for this API key";
-          await supabaseAdmin
-            .from("api_keys")
-            .update({ current_period_spend_usd: newSpend })
-            .eq("id", apiKeyRecord.id);
+          try {
+            const { error: rpcErr } = await supabaseAdmin.rpc("increment_key_spend", {
+              key_id: apiKeyRecord.id,
+              amount: roundedCost,
+            });
+            if (rpcErr) {
+              console.warn("[ingest-edge] increment_key_spend RPC error:", rpcErr.message);
+            }
+          } catch (rpcErr) {
+            console.warn("[ingest-edge] increment_key_spend RPC exception:", rpcErr);
+          }
         } else {
           return NextResponse.json(
             { error: "Budget cap exceeded", action: "block_new_logs" },
@@ -567,10 +574,17 @@ export async function POST(req: NextRequest) {
           })().catch((err) => console.error("[budget-alerts] Non-blocking warning email dispatch error:", err));
         }
 
-        await supabaseAdmin
-          .from("api_keys")
-          .update({ current_period_spend_usd: newSpend })
-          .eq("id", apiKeyRecord.id);
+        try {
+          const { error: rpcErr } = await supabaseAdmin.rpc("increment_key_spend", {
+            key_id: apiKeyRecord.id,
+            amount: roundedCost,
+          });
+          if (rpcErr) {
+            console.warn("[ingest-edge] increment_key_spend RPC error:", rpcErr.message);
+          }
+        } catch (rpcErr) {
+          console.warn("[ingest-edge] increment_key_spend RPC exception:", rpcErr);
+        }
       }
     }
 

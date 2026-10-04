@@ -246,11 +246,18 @@ export async function POST(req: NextRequest) {
       if (keyRecord?.id) {
         const totalBatchCost = insertRows.reduce((acc, r) => acc + Number(r.total_cost_usd || 0), 0);
         if (totalBatchCost > 0) {
-          const newSpend = Number((currentSpend + totalBatchCost).toFixed(6));
-          await supabaseAdmin
-            .from("api_keys")
-            .update({ current_period_spend_usd: newSpend })
-            .eq("id", keyRecord.id);
+          const roundedCost = totalBatchCost;
+          try {
+            const { error: rpcErr } = await supabaseAdmin.rpc("increment_key_spend", {
+              key_id: keyRecord.id,
+              amount: roundedCost,
+            });
+            if (rpcErr) {
+              console.warn("[otel] increment_key_spend RPC error:", rpcErr.message);
+            }
+          } catch (rpcErr) {
+            console.warn("[otel] increment_key_spend RPC exception:", rpcErr);
+          }
         }
       }
     }
