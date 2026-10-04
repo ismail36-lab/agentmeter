@@ -93,24 +93,21 @@ export async function calculateSingleCustomerMargin(
     console.warn(`[customer-profitability] Profile fetch notice for ${userId}:`, err);
   }
 
-  // 3. Aggregate LLM usage log costs specifically for this user
+  // 3. Aggregate LLM usage log costs specifically for this user via server-side RPC
+  // (avoids PostgREST's default 1,000-row cap on unbounded selects)
   let totalCost = 0;
   let logCount = 0;
 
   try {
-    const { data: logs, error: logsErr } = await supabaseAdmin
-      .from("usage_logs")
-      .select("total_cost_usd, cost")
-      .eq("user_id", userId);
+    const { data: summary, error: rpcErr } = await supabaseAdmin.rpc("get_user_cost_summary", {
+      p_user_id: userId,
+    });
 
-    if (!logsErr && logs) {
-      logCount = logs.length;
-      logs.forEach((log: any) => {
-        const cost = Number(log.total_cost_usd ?? log.cost ?? 0);
-        if (!isNaN(cost)) {
-          totalCost += cost;
-        }
-      });
+    if (!rpcErr && summary && summary.length > 0) {
+      totalCost = Number(summary[0].total_cost ?? 0);
+      logCount = Number(summary[0].log_count ?? 0);
+    } else if (rpcErr) {
+      console.warn(`[customer-profitability] get_user_cost_summary RPC notice for ${userId}:`, rpcErr.message);
     }
   } catch (err) {
     console.warn(`[customer-profitability] usage_logs query notice for ${userId}:`, err);
