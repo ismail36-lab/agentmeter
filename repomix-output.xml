@@ -32,7 +32,7 @@ The content is organized as follows:
 <notes>
 - Some files may have been excluded based on .gitignore rules and Repomix's configuration
 - Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
-- Files matching these patterns are excluded: node_modules/**, .next/**, dist/**, .git/**, public/**
+- Files matching these patterns are excluded: node_modules/**, .next/**, out/**, public/**, *.lock, package-lock.json
 - Files matching patterns in .gitignore are excluded
 - Files matching default ignore patterns are excluded
 - Files are sorted by Git change count (files with more changes are at the bottom)
@@ -191,6 +191,8 @@ supabase/
     20260922_prompt_version_registry.sql
     20260929000000_add_idempotency_key_unique_index.sql
     20260929000001_create_increment_key_spend_rpc.sql
+    20261003000000_restrict_increment_key_spend_grants.sql
+    20261003000001_create_user_cost_summary_rpc.sql
 tests/
   test_ingest_consolidation.ts
   test_monthly_quota.ts
@@ -6477,6 +6479,133 @@ export async function POST(req: NextRequest) {
 }
 </file>
 
+<file path="app/api/checkout/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/utils/supabase/server";
+
+export const dynamic = "force-dynamic";
+
+export async function GET(req: NextRequest) {
+  return handleCheckout(req);
+}
+
+export async function POST(req: NextRequest) {
+  return handleCheckout(req);
+}
+
+async function handleCheckout(req: NextRequest) {
+  const supabase = createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  const { searchParams } = new URL(req.url);
+  let plan = searchParams.get("plan") || "pro";
+
+  if (req.method === "POST") {
+    try {
+      const body = await req.json();
+      if (body?.plan) plan = body.plan;
+    } catch { }
+  }
+
+  const requestedPlan = String(plan).toLowerCase();
+
+  const lsApiKey = process.env.LEMONSQUEEZY_API_KEY;
+  const lsStoreId = process.env.LEMONSQUEEZY_STORE_ID;
+  const lsVariantId = process.env.LEMONSQUEEZY_PRO_VARIANT_ID;
+
+  if (!lsApiKey || !lsStoreId || !lsVariantId) {
+    console.error(
+      "Lemon Squeezy is not configured. Missing:",
+      !lsApiKey ? "LEMONSQUEEZY_API_KEY " : "",
+      !lsStoreId ? "LEMONSQUEEZY_STORE_ID " : "",
+      !lsVariantId ? "LEMONSQUEEZY_PRO_VARIANT_ID" : ""
+    );
+    return NextResponse.json(
+      { error: "Billing is not configured on the server. Contact support." },
+      { status: 500 }
+    );
+  }
+
+  const domain = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
+
+  const lsPayload = {
+    data: {
+      type: "checkouts",
+      attributes: {
+        checkout_data: {
+          email: user.email ?? undefined,
+          custom: {
+            user_id: user.id,
+          },
+        },
+        product_options: {
+          redirect_url: `${domain}/dashboard?checkout=success&plan=${requestedPlan}`,
+        },
+      },
+      relationships: {
+        store: {
+          data: { type: "stores", id: String(lsStoreId) },
+        },
+        variant: {
+          data: { type: "variants", id: String(lsVariantId) },
+        },
+      },
+    },
+  };
+
+  let lsRes: Response;
+  try {
+    lsRes = await fetch("https://api.lemonsqueezy.com/v1/checkouts", {
+      method: "POST",
+      headers: {
+        Accept: "application/vnd.api+json",
+        "Content-Type": "application/vnd.api+json",
+        Authorization: `Bearer ${lsApiKey}`,
+      },
+      body: JSON.stringify(lsPayload),
+    });
+  } catch (err) {
+    console.error("Lemon Squeezy checkout request failed to send:", err);
+    return NextResponse.json(
+      { error: "Could not reach Lemon Squeezy. Try again shortly." },
+      { status: 502 }
+    );
+  }
+
+  if (!lsRes.ok) {
+    const errBody = await lsRes.text();
+    console.error("Lemon Squeezy Checkout Error:", lsRes.status, errBody);
+    return NextResponse.json(
+      { error: "Lemon Squeezy rejected the checkout request.", details: errBody },
+      { status: 502 }
+    );
+  }
+
+  const lsData = await lsRes.json();
+  const checkoutUrl = lsData?.data?.attributes?.url;
+
+  if (!checkoutUrl) {
+    console.error("Lemon Squeezy response had no checkout URL:", JSON.stringify(lsData));
+    return NextResponse.json(
+      { error: "Lemon Squeezy did not return a checkout URL." },
+      { status: 502 }
+    );
+  }
+
+  if (req.headers.get("accept")?.includes("text/html")) {
+    return NextResponse.redirect(checkoutUrl);
+  }
+
+  return NextResponse.json({ url: checkoutUrl });
+}
+</file>
+
 <file path="app/api/keys/[id]/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
@@ -7484,6 +7613,235 @@ export async function GET() {
       { status: 500, headers: getCorsHeaders() }
     );
   }
+}
+</file>
+
+<file path="app/api/projects/[id]/settings/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/utils/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { authorizeRole } from "@/lib/rbac";
+
+export const dynamic = "force-dynamic";
+
+// ---------------------------------------------------------------------------
+// Allowed retention options (days). Enforced server-side to prevent arbitrary values.
+// ---------------------------------------------------------------------------
+const ALLOWED_RETENTION_DAYS = [7, 30, 60, 90, 365] as const;
+type RetentionDays = (typeof ALLOWED_RETENTION_DAYS)[number];
+
+// ---------------------------------------------------------------------------
+// GET /api/projects/[id]/settings
+// Returns current project settings visible to any authenticated project member.
+// ---------------------------------------------------------------------------
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const supabase = createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const projectId = params.id;
+
+  // Any project member can read settings (viewer and above).
+  const auth = await authorizeRole(projectId, "viewer");
+  if (!auth.authorized) {
+    return NextResponse.json(
+      { error: auth.reason ?? "Forbidden" },
+      { status: 403 }
+    );
+  }
+
+  // Resolve user plan (profiles table as single source of truth)
+  let userPlan = "free";
+  try {
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("plan")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profile?.plan) {
+      userPlan = String(profile.plan).toLowerCase();
+    }
+  } catch (err) {
+    console.warn("[project settings GET] plan check warning:", err);
+  }
+
+  let projectData = null;
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("projects")
+      .select("id, name, retention_days, created_at")
+      .eq("id", projectId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn("[project settings GET] DB read warning:", error.message);
+    }
+    projectData = data;
+  } catch (err) {
+    console.warn("[project settings GET] DB exception:", err);
+  }
+
+  // Fall back to a default project record if not found in database yet
+  if (!projectData) {
+    projectData = {
+      id: projectId,
+      name: "Default Project",
+      retention_days: userPlan === "free" ? 7 : 30,
+      created_at: new Date().toISOString(),
+    };
+  }
+
+  return NextResponse.json({
+    project: projectData,
+    userRole: auth.role ?? "owner",
+    userPlan,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /api/projects/[id]/settings
+// Updates mutable project settings. Restricted to admin / owner.
+// Body: { retention_days?: 7 | 30 | 60 | 90 | 365 }
+// ---------------------------------------------------------------------------
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  const supabase = createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
+
+  if (authError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const projectId = params.id;
+
+  // Only admins and owners may mutate project settings.
+  const auth = await authorizeRole(projectId, "admin");
+  if (!auth.authorized) {
+    return NextResponse.json(
+      { error: auth.reason ?? "Forbidden. Only admins and owners can modify retention settings." },
+      { status: 403 }
+    );
+  }
+
+  // Resolve user plan (profiles table as single source of truth)
+  let userPlan = "free";
+  try {
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("plan")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profile?.plan) {
+      userPlan = String(profile.plan).toLowerCase();
+    }
+  } catch (err) {
+    console.warn("[project settings PATCH] plan check warning:", err);
+  }
+
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  // Build a safe, typed patch object — only handle fields we explicitly allow.
+  const patch: Record<string, unknown> = {};
+
+  // --- retention_days ---
+  if ("retention_days" in body) {
+    const rawDays = Number(body.retention_days);
+    if (
+      !Number.isInteger(rawDays) ||
+      !(ALLOWED_RETENTION_DAYS as readonly number[]).includes(rawDays)
+    ) {
+      return NextResponse.json(
+        {
+          error: `retention_days must be one of: ${ALLOWED_RETENTION_DAYS.join(", ")}`,
+        },
+        { status: 422 }
+      );
+    }
+
+    // Tier enforcement
+    if (userPlan === "free" && rawDays > 7) {
+      return NextResponse.json(
+        {
+          error: "Free tier is limited to 7-day data retention. Upgrade to Pro to unlock up to 30 days.",
+        },
+        { status: 403 }
+      );
+    }
+
+    if (userPlan === "pro" && rawDays > 30) {
+      return NextResponse.json(
+        {
+          error: "Pro plan is limited to 30-day data retention. Enterprise plan required for longer retention.",
+        },
+        { status: 403 }
+      );
+    }
+
+    patch.retention_days = rawDays as RetentionDays;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return NextResponse.json(
+      { error: "No valid fields provided to update" },
+      { status: 400 }
+    );
+  }
+
+  patch.updated_at = new Date().toISOString();
+
+  let updatedProject = null;
+  try {
+    const { data, error: updateError } = await supabaseAdmin
+      .from("projects")
+      .upsert({ id: projectId, ...patch })
+      .select("id, name, retention_days, updated_at")
+      .maybeSingle();
+
+    if (updateError) {
+      console.warn("[project settings PATCH] DB update error:", updateError.message);
+    } else {
+      updatedProject = data;
+    }
+  } catch (err) {
+    console.warn("[project settings PATCH] DB exception:", err);
+  }
+
+  if (!updatedProject) {
+    updatedProject = {
+      id: projectId,
+      retention_days: patch.retention_days ?? 7,
+      updated_at: patch.updated_at,
+    };
+  }
+
+  return NextResponse.json({
+    success: true,
+    project: updatedProject,
+    updatedBy: auth.userId,
+    updaterRole: auth.role,
+    userPlan,
+  });
 }
 </file>
 
@@ -9628,215 +9986,6 @@ export async function sendAnomalyAlert({
 }
 </file>
 
-<file path="lib/customer-profitability.ts">
-import { supabaseAdmin } from "@/lib/supabase/admin";
-
-export type RevenueSource = "lemonsqueezy_active" | "plan_estimate" | "free";
-
-export interface CustomerMarginItem {
-  user_id: string;
-  email: string;
-  lemon_squeezy_customer_id: string | null;
-  lemon_squeezy_subscription_id: string | null;
-  plan: string;
-  subscription_status: string | null;
-  revenue: number;
-  revenue_source: RevenueSource;
-  is_revenue_estimated: boolean;
-  total_cost: number;
-  margin: number;
-  margin_percentage: number;
-  status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account";
-  log_count: number;
-  last_synced_at: string;
-}
-
-/**
- * Calculates customer margin metrics for a single specific user.
- * Scoped strictly to the target userId (does not perform full-platform scans).
- */
-export async function calculateSingleCustomerMargin(
-  userId: string,
-  userEmail?: string
-): Promise<CustomerMarginItem> {
-  const nowIso = new Date().toISOString();
-
-  // 1. Resolve Lemon Squeezy Pro pricing (env fallback)
-  const lsFallbackPriceUSD = Number(process.env.LEMONSQUEEZY_PRO_PRICE_USD ?? 29);
-  let proPriceUSD = lsFallbackPriceUSD;
-  let proPriceIsLive = false;
-
-  const lsApiKey = process.env.LEMONSQUEEZY_API_KEY || "";
-  const lsVariantId = process.env.LEMONSQUEEZY_PRO_VARIANT_ID || "";
-
-  if (lsApiKey && lsVariantId) {
-    try {
-      const res = await fetch(
-        `https://api.lemonsqueezy.com/v1/variants/${encodeURIComponent(lsVariantId)}`,
-        {
-          headers: {
-            Authorization: `Bearer ${lsApiKey}`,
-            Accept: "application/vnd.api+json",
-          },
-        }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        const priceCents: number | undefined = data?.data?.attributes?.price;
-        if (typeof priceCents === "number" && priceCents > 0) {
-          proPriceUSD = Number((priceCents / 100).toFixed(2));
-          proPriceIsLive = true;
-        }
-      }
-    } catch (err) {
-      console.warn(`[customer-profitability] Variant price fetch notice for ${userId}:`, err);
-    }
-  }
-
-  // 2. Fetch profile data specifically for this user
-  let email = userEmail || "user@example.com";
-  let plan = "free";
-  let subscriptionStatus: string | null = null;
-  let lemonSqueezyCustomerId: string | null = null;
-  let lemonSqueezySubscriptionId: string | null = null;
-
-  try {
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("email, plan, subscription_status, lemon_squeezy_customer_id, lemon_squeezy_subscription_id")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profile) {
-      if (profile.email) email = profile.email;
-      if (profile.plan) plan = String(profile.plan).toLowerCase();
-      subscriptionStatus = profile.subscription_status ? String(profile.subscription_status) : null;
-      lemonSqueezyCustomerId = profile.lemon_squeezy_customer_id ? String(profile.lemon_squeezy_customer_id) : null;
-      lemonSqueezySubscriptionId = profile.lemon_squeezy_subscription_id ? String(profile.lemon_squeezy_subscription_id) : null;
-    } else {
-      // Fallback: lookup user in auth.users
-      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
-      if (authUser?.user?.email) {
-        email = authUser.user.email;
-      }
-    }
-  } catch (err) {
-    console.warn(`[customer-profitability] Profile fetch notice for ${userId}:`, err);
-  }
-
-  // 3. Aggregate LLM usage log costs specifically for this user
-  let totalCost = 0;
-  let logCount = 0;
-
-  try {
-    const { data: logs, error: logsErr } = await supabaseAdmin
-      .from("usage_logs")
-      .select("total_cost_usd, cost")
-      .eq("user_id", userId);
-
-    if (!logsErr && logs) {
-      logCount = logs.length;
-      logs.forEach((log: any) => {
-        const cost = Number(log.total_cost_usd ?? log.cost ?? 0);
-        if (!isNaN(cost)) {
-          totalCost += cost;
-        }
-      });
-    }
-  } catch (err) {
-    console.warn(`[customer-profitability] usage_logs query notice for ${userId}:`, err);
-  }
-
-  // 4. Compute revenue & margins
-  let revenue = 0;
-  let revenueSource: RevenueSource = "free";
-  let isRevenueEstimated = false;
-
-  const isActivePro =
-    plan === "pro" &&
-    (subscriptionStatus === "active" || subscriptionStatus === "on_trial");
-
-  const isInactivePro = plan === "pro" && !isActivePro;
-
-  if (isActivePro) {
-    revenue = proPriceUSD;
-    revenueSource = "lemonsqueezy_active";
-    isRevenueEstimated = !proPriceIsLive;
-  } else if (isInactivePro) {
-    revenue = proPriceUSD;
-    revenueSource = "plan_estimate";
-    isRevenueEstimated = true;
-  } else {
-    revenue = 0;
-    revenueSource = "free";
-    isRevenueEstimated = false;
-  }
-
-  const roundedTotalCost = Number(totalCost.toFixed(4));
-  const margin = Number((revenue - roundedTotalCost).toFixed(4));
-
-  let marginPercentage = 0;
-  if (revenue > 0) {
-    marginPercentage = Number(((margin / revenue) * 100).toFixed(1));
-  } else if (roundedTotalCost > 0) {
-    marginPercentage = -100;
-  }
-
-  let status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account" = "profitable";
-  if (revenue === 0 && roundedTotalCost === 0) {
-    status = "no_data";
-  } else if (margin < 0) {
-    status = "unprofitable";
-  } else if (marginPercentage < 30 || margin < 10) {
-    status = "low_margin";
-  }
-
-  const marginItem: CustomerMarginItem = {
-    user_id: userId,
-    email,
-    lemon_squeezy_customer_id: lemonSqueezyCustomerId,
-    lemon_squeezy_subscription_id: lemonSqueezySubscriptionId,
-    plan,
-    subscription_status: subscriptionStatus,
-    revenue,
-    revenue_source: revenueSource,
-    is_revenue_estimated: isRevenueEstimated,
-    total_cost: roundedTotalCost,
-    margin,
-    margin_percentage: marginPercentage,
-    status,
-    log_count: logCount,
-    last_synced_at: nowIso,
-  };
-
-  // 5. Upsert single user margin record into customer_margins table
-  try {
-    await supabaseAdmin.from("customer_margins").upsert([
-      {
-        user_id: marginItem.user_id,
-        email: marginItem.email,
-        lemon_squeezy_customer_id: marginItem.lemon_squeezy_customer_id,
-        lemon_squeezy_subscription_id: marginItem.lemon_squeezy_subscription_id,
-        plan: marginItem.plan,
-        subscription_status: marginItem.subscription_status,
-        revenue: marginItem.revenue,
-        revenue_source: marginItem.revenue_source,
-        is_revenue_estimated: marginItem.is_revenue_estimated,
-        total_cost: marginItem.total_cost,
-        margin: marginItem.margin,
-        margin_percentage: marginItem.margin_percentage,
-        status: marginItem.status,
-        updated_at: nowIso,
-      },
-    ]);
-  } catch (err) {
-    console.warn(`[customer-profitability] Upsert notice for ${userId}:`, err);
-  }
-
-  return marginItem;
-}
-</file>
-
 <file path="lib/quota.ts">
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
@@ -10344,6 +10493,42 @@ $$;
 GRANT EXECUTE ON FUNCTION public.increment_key_spend(UUID, NUMERIC) TO service_role;
 GRANT EXECUTE ON FUNCTION public.increment_key_spend(UUID, NUMERIC) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.increment_key_spend(UUID, NUMERIC) TO anon;
+</file>
+
+<file path="supabase/migrations/20261003000000_restrict_increment_key_spend_grants.sql">
+-- Migration: Lock down increment_key_spend to service_role only.
+-- Root cause: CREATE FUNCTION implicitly grants EXECUTE to PUBLIC (which
+-- includes anon/authenticated) unless explicitly revoked. The prior migration
+-- also added explicit grants to anon/authenticated that were never needed —
+-- every call site in the codebase uses the service-role admin client.
+
+REVOKE EXECUTE ON FUNCTION public.increment_key_spend(UUID, NUMERIC) FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION public.increment_key_spend(UUID, NUMERIC) FROM authenticated;
+REVOKE EXECUTE ON FUNCTION public.increment_key_spend(UUID, NUMERIC) FROM anon;
+
+-- Re-affirm the only grant that should exist.
+GRANT EXECUTE ON FUNCTION public.increment_key_spend(UUID, NUMERIC) TO service_role;
+</file>
+
+<file path="supabase/migrations/20261003000001_create_user_cost_summary_rpc.sql">
+-- Migration: Aggregate usage_logs cost/count server-side to avoid PostgREST's
+-- default 1,000-row cap on unbounded selects.
+
+CREATE OR REPLACE FUNCTION public.get_user_cost_summary(p_user_id UUID)
+RETURNS TABLE(total_cost NUMERIC, log_count BIGINT)
+LANGUAGE sql
+STABLE
+SET search_path = public
+AS $$
+  SELECT
+    COALESCE(SUM(COALESCE(total_cost_usd, cost, 0)), 0)::numeric AS total_cost,
+    COUNT(*)::bigint AS log_count
+  FROM public.usage_logs
+  WHERE user_id = p_user_id;
+$$;
+
+-- Lock down execute permissions strictly to service_role
+GRANT EXECUTE ON FUNCTION public.get_user_cost_summary(UUID) TO service_role;
 </file>
 
 <file path="tests/test_ingest_consolidation.ts">
@@ -11425,133 +11610,6 @@ export async function POST(req: NextRequest): Promise<NextResponse<SignupRespons
 }
 </file>
 
-<file path="app/api/checkout/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
-
-export const dynamic = "force-dynamic";
-
-export async function GET(req: NextRequest) {
-  return handleCheckout(req);
-}
-
-export async function POST(req: NextRequest) {
-  return handleCheckout(req);
-}
-
-async function handleCheckout(req: NextRequest) {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
-  }
-
-  const { searchParams } = new URL(req.url);
-  let plan = searchParams.get("plan") || "pro";
-
-  if (req.method === "POST") {
-    try {
-      const body = await req.json();
-      if (body?.plan) plan = body.plan;
-    } catch { }
-  }
-
-  const requestedPlan = String(plan).toLowerCase();
-
-  const lsApiKey = process.env.LEMONSQUEEZY_API_KEY;
-  const lsStoreId = process.env.LEMONSQUEEZY_STORE_ID;
-  const lsVariantId = process.env.LEMONSQUEEZY_PRO_VARIANT_ID;
-
-  if (!lsApiKey || !lsStoreId || !lsVariantId) {
-    console.error(
-      "Lemon Squeezy is not configured. Missing:",
-      !lsApiKey ? "LEMONSQUEEZY_API_KEY " : "",
-      !lsStoreId ? "LEMONSQUEEZY_STORE_ID " : "",
-      !lsVariantId ? "LEMONSQUEEZY_PRO_VARIANT_ID" : ""
-    );
-    return NextResponse.json(
-      { error: "Billing is not configured on the server. Contact support." },
-      { status: 500 }
-    );
-  }
-
-  const domain = process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin;
-
-  const lsPayload = {
-    data: {
-      type: "checkouts",
-      attributes: {
-        checkout_data: {
-          email: user.email ?? undefined,
-          custom: {
-            user_id: user.id,
-          },
-        },
-        product_options: {
-          redirect_url: `${domain}/dashboard?checkout=success&plan=${requestedPlan}`,
-        },
-      },
-      relationships: {
-        store: {
-          data: { type: "stores", id: String(lsStoreId) },
-        },
-        variant: {
-          data: { type: "variants", id: String(lsVariantId) },
-        },
-      },
-    },
-  };
-
-  let lsRes: Response;
-  try {
-    lsRes = await fetch("https://api.lemonsqueezy.com/v1/checkouts", {
-      method: "POST",
-      headers: {
-        Accept: "application/vnd.api+json",
-        "Content-Type": "application/vnd.api+json",
-        Authorization: `Bearer ${lsApiKey}`,
-      },
-      body: JSON.stringify(lsPayload),
-    });
-  } catch (err) {
-    console.error("Lemon Squeezy checkout request failed to send:", err);
-    return NextResponse.json(
-      { error: "Could not reach Lemon Squeezy. Try again shortly." },
-      { status: 502 }
-    );
-  }
-
-  if (!lsRes.ok) {
-    const errBody = await lsRes.text();
-    console.error("Lemon Squeezy Checkout Error:", lsRes.status, errBody);
-    return NextResponse.json(
-      { error: "Lemon Squeezy rejected the checkout request.", details: errBody },
-      { status: 502 }
-    );
-  }
-
-  const lsData = await lsRes.json();
-  const checkoutUrl = lsData?.data?.attributes?.url;
-
-  if (!checkoutUrl) {
-    console.error("Lemon Squeezy response had no checkout URL:", JSON.stringify(lsData));
-    return NextResponse.json(
-      { error: "Lemon Squeezy did not return a checkout URL." },
-      { status: 502 }
-    );
-  }
-
-  if (req.headers.get("accept")?.includes("text/html")) {
-    return NextResponse.redirect(checkoutUrl);
-  }
-
-  return NextResponse.json({ url: checkoutUrl });
-}
-</file>
-
 <file path="app/api/cron/cleanup/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -11748,52 +11806,39 @@ async function handleCleanup(req: NextRequest) {
 }
 </file>
 
-<file path="app/api/projects/[id]/settings/route.ts">
+<file path="app/api/plan/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { authorizeRole } from "@/lib/rbac";
+import { getStartOfCurrentMonthISO } from "@/lib/quota";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
-// ---------------------------------------------------------------------------
-// Allowed retention options (days). Enforced server-side to prevent arbitrary values.
-// ---------------------------------------------------------------------------
-const ALLOWED_RETENTION_DAYS = [7, 30, 60, 90, 365] as const;
-type RetentionDays = (typeof ALLOWED_RETENTION_DAYS)[number];
+const TIER_LIMITS: Record<string, { name: string; limit: number; label: string }> = {
+  free: { name: "Free Sandbox", limit: 5000, label: "5,000 logs/mo" },
+  pro: { name: "Pro Tier", limit: 500000, label: "500,000 logs/mo" },
+};
 
-// ---------------------------------------------------------------------------
-// GET /api/projects/[id]/settings
-// Returns current project settings visible to any authenticated project member.
-// ---------------------------------------------------------------------------
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: { id: string } }
-) {
+export async function GET(req: NextRequest) {
   const supabase = createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+  const NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, max-age=0",
+    "CDN-Cache-Control": "no-store",
+    "Vercel-CDN-Cache-Control": "no-store",
+  };
 
   if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_CACHE_HEADERS });
   }
 
-  const projectId = params.id;
-
-  // Any project member can read settings (viewer and above).
-  const auth = await authorizeRole(projectId, "viewer");
-  if (!auth.authorized) {
-    return NextResponse.json(
-      { error: auth.reason ?? "Forbidden" },
-      { status: 403 }
-    );
-  }
-
-  // Resolve user plan (profiles table as single source of truth)
-  let userPlan = "free";
   try {
+    // Read plan: check public.profiles (single source of truth)
+    let rawPlan = "free";
+
     const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select("plan")
@@ -11801,179 +11846,55 @@ export async function GET(
       .maybeSingle();
 
     if (profile?.plan) {
-      userPlan = String(profile.plan).toLowerCase();
+      rawPlan = String(profile.plan).toLowerCase();
     }
-  } catch (err) {
-    console.warn("[project settings GET] plan check warning:", err);
+
+    const planKey = rawPlan in TIER_LIMITS ? rawPlan : "free";
+    const tier = TIER_LIMITS[planKey];
+
+    // Count monthly log usage for this user
+    const firstDayOfMonth = getStartOfCurrentMonthISO();
+
+    const { count } = await supabaseAdmin
+      .from("usage_logs")
+      .select("id", { count: "exact", head: true })
+      .or(`user_id.eq.${user.id},user_id.is.null`)
+      .gte("created_at", firstDayOfMonth);
+
+    const usageCount = count ?? 0;
+    const percentage = Math.min(100, Number(((usageCount / tier.limit) * 100).toFixed(1)));
+    const remaining = Math.max(0, tier.limit - usageCount);
+
+    return NextResponse.json(
+      {
+        plan: planKey,
+        tierName: tier.name,
+        limit: tier.limit,
+        limitLabel: tier.label,
+        usage: usageCount,
+        percentage,
+        remaining,
+      },
+      { headers: NO_CACHE_HEADERS }
+    );
+  } catch (err: any) {
+    console.error("plan GET exception:", err);
+    return NextResponse.json({ error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
   }
-
-  let projectData = null;
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("projects")
-      .select("id, name, retention_days, created_at")
-      .eq("id", projectId)
-      .maybeSingle();
-
-    if (error) {
-      console.warn("[project settings GET] DB read warning:", error.message);
-    }
-    projectData = data;
-  } catch (err) {
-    console.warn("[project settings GET] DB exception:", err);
-  }
-
-  // Fall back to a default project record if not found in database yet
-  if (!projectData) {
-    projectData = {
-      id: projectId,
-      name: "Default Project",
-      retention_days: userPlan === "free" ? 7 : 30,
-      created_at: new Date().toISOString(),
-    };
-  }
-
-  return NextResponse.json({
-    project: projectData,
-    userRole: auth.role ?? "owner",
-    userPlan,
-  });
 }
 
-// ---------------------------------------------------------------------------
-// PATCH /api/projects/[id]/settings
-// Updates mutable project settings. Restricted to admin / owner.
-// Body: { retention_days?: 7 | 30 | 60 | 90 | 365 }
-// ---------------------------------------------------------------------------
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { id: string } }
-) {
-  const supabase = createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-
-  if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const projectId = params.id;
-
-  // Only admins and owners may mutate project settings.
-  const auth = await authorizeRole(projectId, "admin");
-  if (!auth.authorized) {
-    return NextResponse.json(
-      { error: auth.reason ?? "Forbidden. Only admins and owners can modify retention settings." },
-      { status: 403 }
-    );
-  }
-
-  // Resolve user plan (profiles table as single source of truth)
-  let userPlan = "free";
-  try {
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("plan")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (profile?.plan) {
-      userPlan = String(profile.plan).toLowerCase();
+export async function POST() {
+  return NextResponse.json(
+    { error: "Method not allowed. Plan upgrades must be completed via Lemon Squeezy checkout." },
+    {
+      status: 405,
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+        "CDN-Cache-Control": "no-store",
+        "Vercel-CDN-Cache-Control": "no-store",
+      },
     }
-  } catch (err) {
-    console.warn("[project settings PATCH] plan check warning:", err);
-  }
-
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-
-  // Build a safe, typed patch object — only handle fields we explicitly allow.
-  const patch: Record<string, unknown> = {};
-
-  // --- retention_days ---
-  if ("retention_days" in body) {
-    const rawDays = Number(body.retention_days);
-    if (
-      !Number.isInteger(rawDays) ||
-      !(ALLOWED_RETENTION_DAYS as readonly number[]).includes(rawDays)
-    ) {
-      return NextResponse.json(
-        {
-          error: `retention_days must be one of: ${ALLOWED_RETENTION_DAYS.join(", ")}`,
-        },
-        { status: 422 }
-      );
-    }
-
-    // Tier enforcement
-    if (userPlan === "free" && rawDays > 7) {
-      return NextResponse.json(
-        {
-          error: "Free tier is limited to 7-day data retention. Upgrade to Pro to unlock up to 30 days.",
-        },
-        { status: 403 }
-      );
-    }
-
-    if (userPlan === "pro" && rawDays > 30) {
-      return NextResponse.json(
-        {
-          error: "Pro plan is limited to 30-day data retention. Enterprise plan required for longer retention.",
-        },
-        { status: 403 }
-      );
-    }
-
-    patch.retention_days = rawDays as RetentionDays;
-  }
-
-  if (Object.keys(patch).length === 0) {
-    return NextResponse.json(
-      { error: "No valid fields provided to update" },
-      { status: 400 }
-    );
-  }
-
-  patch.updated_at = new Date().toISOString();
-
-  let updatedProject = null;
-  try {
-    const { data, error: updateError } = await supabaseAdmin
-      .from("projects")
-      .upsert({ id: projectId, ...patch })
-      .select("id, name, retention_days, updated_at")
-      .maybeSingle();
-
-    if (updateError) {
-      console.warn("[project settings PATCH] DB update error:", updateError.message);
-    } else {
-      updatedProject = data;
-    }
-  } catch (err) {
-    console.warn("[project settings PATCH] DB exception:", err);
-  }
-
-  if (!updatedProject) {
-    updatedProject = {
-      id: projectId,
-      retention_days: patch.retention_days ?? 7,
-      updated_at: patch.updated_at,
-    };
-  }
-
-  return NextResponse.json({
-    success: true,
-    project: updatedProject,
-    updatedBy: auth.userId,
-    updaterRole: auth.role,
-    userPlan,
-  });
+  );
 }
 </file>
 
@@ -12607,6 +12528,212 @@ export const supabase = createBrowserClient();
 export default supabase;
 </file>
 
+<file path="lib/customer-profitability.ts">
+import { supabaseAdmin } from "@/lib/supabase/admin";
+
+export type RevenueSource = "lemonsqueezy_active" | "plan_estimate" | "free";
+
+export interface CustomerMarginItem {
+  user_id: string;
+  email: string;
+  lemon_squeezy_customer_id: string | null;
+  lemon_squeezy_subscription_id: string | null;
+  plan: string;
+  subscription_status: string | null;
+  revenue: number;
+  revenue_source: RevenueSource;
+  is_revenue_estimated: boolean;
+  total_cost: number;
+  margin: number;
+  margin_percentage: number;
+  status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account";
+  log_count: number;
+  last_synced_at: string;
+}
+
+/**
+ * Calculates customer margin metrics for a single specific user.
+ * Scoped strictly to the target userId (does not perform full-platform scans).
+ */
+export async function calculateSingleCustomerMargin(
+  userId: string,
+  userEmail?: string
+): Promise<CustomerMarginItem> {
+  const nowIso = new Date().toISOString();
+
+  // 1. Resolve Lemon Squeezy Pro pricing (env fallback)
+  const lsFallbackPriceUSD = Number(process.env.LEMONSQUEEZY_PRO_PRICE_USD ?? 29);
+  let proPriceUSD = lsFallbackPriceUSD;
+  let proPriceIsLive = false;
+
+  const lsApiKey = process.env.LEMONSQUEEZY_API_KEY || "";
+  const lsVariantId = process.env.LEMONSQUEEZY_PRO_VARIANT_ID || "";
+
+  if (lsApiKey && lsVariantId) {
+    try {
+      const res = await fetch(
+        `https://api.lemonsqueezy.com/v1/variants/${encodeURIComponent(lsVariantId)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${lsApiKey}`,
+            Accept: "application/vnd.api+json",
+          },
+        }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const priceCents: number | undefined = data?.data?.attributes?.price;
+        if (typeof priceCents === "number" && priceCents > 0) {
+          proPriceUSD = Number((priceCents / 100).toFixed(2));
+          proPriceIsLive = true;
+        }
+      }
+    } catch (err) {
+      console.warn(`[customer-profitability] Variant price fetch notice for ${userId}:`, err);
+    }
+  }
+
+  // 2. Fetch profile data specifically for this user
+  let email = userEmail || "user@example.com";
+  let plan = "free";
+  let subscriptionStatus: string | null = null;
+  let lemonSqueezyCustomerId: string | null = null;
+  let lemonSqueezySubscriptionId: string | null = null;
+
+  try {
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("email, plan, subscription_status, lemon_squeezy_customer_id, lemon_squeezy_subscription_id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (profile) {
+      if (profile.email) email = profile.email;
+      if (profile.plan) plan = String(profile.plan).toLowerCase();
+      subscriptionStatus = profile.subscription_status ? String(profile.subscription_status) : null;
+      lemonSqueezyCustomerId = profile.lemon_squeezy_customer_id ? String(profile.lemon_squeezy_customer_id) : null;
+      lemonSqueezySubscriptionId = profile.lemon_squeezy_subscription_id ? String(profile.lemon_squeezy_subscription_id) : null;
+    } else {
+      // Fallback: lookup user in auth.users
+      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
+      if (authUser?.user?.email) {
+        email = authUser.user.email;
+      }
+    }
+  } catch (err) {
+    console.warn(`[customer-profitability] Profile fetch notice for ${userId}:`, err);
+  }
+
+  // 3. Aggregate LLM usage log costs specifically for this user via server-side RPC
+  // (avoids PostgREST's default 1,000-row cap on unbounded selects)
+  let totalCost = 0;
+  let logCount = 0;
+
+  try {
+    const { data: summary, error: rpcErr } = await supabaseAdmin.rpc("get_user_cost_summary", {
+      p_user_id: userId,
+    });
+
+    if (!rpcErr && summary && summary.length > 0) {
+      totalCost = Number(summary[0].total_cost ?? 0);
+      logCount = Number(summary[0].log_count ?? 0);
+    } else if (rpcErr) {
+      console.warn(`[customer-profitability] get_user_cost_summary RPC notice for ${userId}:`, rpcErr.message);
+    }
+  } catch (err) {
+    console.warn(`[customer-profitability] usage_logs query notice for ${userId}:`, err);
+  }
+
+  // 4. Compute revenue & margins
+  let revenue = 0;
+  let revenueSource: RevenueSource = "free";
+  let isRevenueEstimated = false;
+
+  const isActivePro =
+    plan === "pro" &&
+    (subscriptionStatus === "active" || subscriptionStatus === "on_trial");
+
+  const isInactivePro = plan === "pro" && !isActivePro;
+
+  if (isActivePro) {
+    revenue = proPriceUSD;
+    revenueSource = "lemonsqueezy_active";
+    isRevenueEstimated = !proPriceIsLive;
+  } else if (isInactivePro) {
+    revenue = proPriceUSD;
+    revenueSource = "plan_estimate";
+    isRevenueEstimated = true;
+  } else {
+    revenue = 0;
+    revenueSource = "free";
+    isRevenueEstimated = false;
+  }
+
+  const roundedTotalCost = Number(totalCost.toFixed(4));
+  const margin = Number((revenue - roundedTotalCost).toFixed(4));
+
+  let marginPercentage = 0;
+  if (revenue > 0) {
+    marginPercentage = Number(((margin / revenue) * 100).toFixed(1));
+  } else if (roundedTotalCost > 0) {
+    marginPercentage = -100;
+  }
+
+  let status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account" = "profitable";
+  if (revenue === 0 && roundedTotalCost === 0) {
+    status = "no_data";
+  } else if (margin < 0) {
+    status = "unprofitable";
+  } else if (marginPercentage < 30 || margin < 10) {
+    status = "low_margin";
+  }
+
+  const marginItem: CustomerMarginItem = {
+    user_id: userId,
+    email,
+    lemon_squeezy_customer_id: lemonSqueezyCustomerId,
+    lemon_squeezy_subscription_id: lemonSqueezySubscriptionId,
+    plan,
+    subscription_status: subscriptionStatus,
+    revenue,
+    revenue_source: revenueSource,
+    is_revenue_estimated: isRevenueEstimated,
+    total_cost: roundedTotalCost,
+    margin,
+    margin_percentage: marginPercentage,
+    status,
+    log_count: logCount,
+    last_synced_at: nowIso,
+  };
+
+  // 5. Upsert single user margin record into customer_margins table
+  try {
+    await supabaseAdmin.from("customer_margins").upsert([
+      {
+        user_id: marginItem.user_id,
+        email: marginItem.email,
+        lemon_squeezy_customer_id: marginItem.lemon_squeezy_customer_id,
+        lemon_squeezy_subscription_id: marginItem.lemon_squeezy_subscription_id,
+        plan: marginItem.plan,
+        subscription_status: marginItem.subscription_status,
+        revenue: marginItem.revenue,
+        revenue_source: marginItem.revenue_source,
+        is_revenue_estimated: marginItem.is_revenue_estimated,
+        total_cost: marginItem.total_cost,
+        margin: marginItem.margin,
+        margin_percentage: marginItem.margin_percentage,
+        status: marginItem.status,
+        updated_at: nowIso,
+      },
+    ]);
+  } catch (err) {
+    console.warn(`[customer-profitability] Upsert notice for ${userId}:`, err);
+  }
+
+  return marginItem;
+}
+</file>
+
 <file path="lib/otel-adapter.ts">
 /**
  * OpenTelemetry (OTel) OTLP Trace Adapter
@@ -13120,135 +13247,254 @@ node_modules/
 !.env.example
 </file>
 
-<file path="package.json">
-{
-  "name": "meterix",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
-  },
-  "dependencies": {
-    "@react-email/components": "^1.0.12",
-    "@react-email/render": "^2.1.0",
-    "@supabase/ssr": "^0.12.4",
-    "@supabase/supabase-js": "^2.45.0",
-    "@upstash/ratelimit": "^2.1.0",
-    "@upstash/redis": "^1.38.4",
-    "clsx": "^2.1.1",
-    "lucide-react": "^0.428.0",
-    "next": "14.2.5",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-email": "^6.9.5",
-    "recharts": "^2.15.4",
-    "resend": "^6.27.0",
-    "server-only": "^0.0.1",
-    "tailwind-merge": "^2.5.2"
-  },
-  "devDependencies": {
-    "@types/node": "^20.14.12",
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
-    "autoprefixer": "^10.4.20",
-    "postcss": "^8.4.41",
-    "tailwindcss": "^3.4.10",
-    "typescript": "^5.5.4"
-  }
-}
-</file>
-
-<file path="app/api/cron/reset-budget-caps/route.ts">
+<file path="app/api/session-rollups/route.ts">
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/utils/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+export interface SessionRollupItem {
+  session_id: string;
+  agent_name: string;
+  total_cost: number;
+  call_count: number;
+  models_used: string[];
+  start_time: string;
+  end_time: string;
+  duration_seconds: number;
+}
+
 export async function GET(req: NextRequest) {
-  return handleResetBudgetCaps(req);
-}
+  const supabase = createClient();
+  const {
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
 
-export async function POST(req: NextRequest) {
-  return handleResetBudgetCaps(req);
-}
+  const NO_CACHE_HEADERS = {
+    "Cache-Control": "no-store, max-age=0",
+    "CDN-Cache-Control": "no-store",
+    "Vercel-CDN-Cache-Control": "no-store",
+  };
 
-async function handleResetBudgetCaps(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  const authHeader = req.headers.get("authorization");
-  const xCronSecret = req.headers.get("x-cron-secret");
-  const { searchParams } = new URL(req.url);
-  const paramSecret = searchParams.get("secret") || searchParams.get("cron_secret");
-
-  if (!cronSecret) {
-    if (process.env.NODE_ENV !== "development") {
-      return NextResponse.json(
-        { error: "CRON_SECRET environment variable missing on server" },
-        { status: 500 }
-      );
-    }
-  } else {
-    const isAuthorized =
-      authHeader === `Bearer ${cronSecret}` ||
-      authHeader === cronSecret ||
-      xCronSecret === cronSecret ||
-      paramSecret === cronSecret;
-
-    if (!isAuthorized) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  if (authError || !user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_CACHE_HEADERS });
   }
 
   try {
-    const supabaseUrl =
-      process.env.NEXT_PUBLIC_SUPABASE_URL || "https://placeholder.supabase.co";
-    const serviceKey =
-      process.env.SUPABASE_SERVICE_ROLE_KEY ||
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-      "";
+    // 1. Primary lookup: Query Postgres view/table `session_cost_rollup` strictly scoped to user.id
+    const PAGE_SIZE = 1000;
+    let viewRows: any[] = [];
+    let viewFrom = 0;
+    let hasViewError = false;
 
-    const supabase = createClient(supabaseUrl, serviceKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    });
+    while (true) {
+      const { data: viewPage, error: viewError } = await supabaseAdmin
+        .from("session_cost_rollup")
+        .select("*")
+        .eq("user_id", user.id)
+        .range(viewFrom, viewFrom + PAGE_SIZE - 1);
 
-    const { data, error } = await supabase
-      .from("api_keys")
-      .update({ current_period_spend_usd: 0, budget_alert_sent: false })
-      .neq("id", "00000000-0000-0000-0000-000000000000")
-      .select();
+      if (viewError) {
+        hasViewError = true;
+        break;
+      }
+      if (!viewPage || viewPage.length === 0) break;
 
-    if (error) {
-      console.error("Supabase db error during reset:", error);
-      return NextResponse.json(
-        { success: false, db_error: error },
-        { status: 500 }
-      );
+      viewRows.push(...viewPage);
+      if (viewPage.length < PAGE_SIZE) break;
+      viewFrom += PAGE_SIZE;
     }
 
-    return NextResponse.json(
-      {
-        success: true,
-        message: "Reset completed",
-        updated: data,
-      },
-      {
-        status: 200,
-        headers: {
-          "Cache-Control": "no-store, max-age=0",
-        },
+    if (!hasViewError && viewRows.length > 0) {
+      const userViewRows = viewRows.filter((row: any) => {
+        if (row.user_id !== user.id) return false;
+        const sid = String(row.session_id || "").trim();
+        return sid.length > 0 && sid !== "null" && sid !== "undefined";
+      });
+
+      if (userViewRows.length > 0) {
+        const formattedFromView: SessionRollupItem[] = userViewRows.map((row: any) => {
+          const rawModels = Array.isArray(row.models_used)
+            ? row.models_used
+            : typeof row.models_used === "string"
+            ? row.models_used.split(",").map((m: string) => m.trim())
+            : [row.model || "gpt-4o"];
+
+          const startTime = new Date(row.start_time || row.first_call || row.created_at || Date.now());
+          const endTime = new Date(row.end_time || row.last_call || row.created_at || Date.now());
+          let durationSec = Number(row.duration_seconds ?? row.duration ?? 0);
+
+          if (!durationSec && startTime && endTime) {
+            durationSec = Math.max(0, Number(((endTime.getTime() - startTime.getTime()) / 1000).toFixed(1)));
+          }
+
+          return {
+            session_id: String(row.session_id).trim(),
+            agent_name: String(row.agent_name || row.agent || "AgentTask").trim(),
+            total_cost: Number(Number(row.total_cost ?? row.total_cost_usd ?? row.cost ?? 0).toFixed(6)),
+            call_count: Number(row.call_count ?? row.total_calls ?? row.calls ?? 1),
+            models_used: Array.from(new Set(rawModels.filter(Boolean))),
+            start_time: startTime.toISOString(),
+            end_time: endTime.toISOString(),
+            duration_seconds: durationSec,
+          };
+        });
+
+        return NextResponse.json({ success: true, sessions: formattedFromView }, { headers: NO_CACHE_HEADERS });
       }
-    );
-  } catch (err: any) {
-    console.error("Cron reset error:", err);
+    }
+
+    // 2. Secondary fallback: Query usage_logs strictly scoped to user.id (paginated)
+    let logs: any[] = [];
+    let logsFrom = 0;
+
+    while (true) {
+      const { data: logsPage, error: logsError } = await supabaseAdmin
+        .from("usage_logs")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: true })
+        .range(logsFrom, logsFrom + PAGE_SIZE - 1);
+
+      if (logsError) {
+        console.warn("session-rollups usage_logs query notice:", logsError.message);
+        break;
+      }
+
+      if (!logsPage || logsPage.length === 0) break;
+      logs.push(...logsPage);
+      if (logsPage.length < PAGE_SIZE) break;
+      logsFrom += PAGE_SIZE;
+    }
+
+    let allLogs = logs;
+
+    // Fallback check to telemetry_logs strictly scoped to user.id if usage_logs is empty (paginated)
+    if (allLogs.length === 0) {
+      const tLogs: any[] = [];
+      let tLogsFrom = 0;
+
+      while (true) {
+        const { data: tLogsPage, error: tLogsError } = await supabaseAdmin
+          .from("telemetry_logs")
+          .select("*")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: true })
+          .range(tLogsFrom, tLogsFrom + PAGE_SIZE - 1);
+
+        if (tLogsError || !tLogsPage || tLogsPage.length === 0) break;
+        tLogs.push(...tLogsPage);
+        if (tLogsPage.length < PAGE_SIZE) break;
+        tLogsFrom += PAGE_SIZE;
+      }
+
+      if (tLogs.length > 0) {
+        allLogs = tLogs;
+      }
+    }
+
+    const sessionMap: Record<
+      string,
+      {
+        session_id: string;
+        agent_name: string;
+        total_cost: number;
+        call_count: number;
+        models: Set<string>;
+        first_time: number;
+        last_time: number;
+        total_latency_ms: number;
+      }
+    > = {};
+
+    allLogs.forEach((log) => {
+      const rawPayload = log.raw_payload || log.metadata || {};
+      const sessId = String(
+        log.session_id ||
+        log.sessionId ||
+        log.metadata?.session_id ||
+        log.metadata?.sessionId ||
+        rawPayload.session_id ||
+        rawPayload.sessionId ||
+        rawPayload.metadata?.session_id ||
+        rawPayload.metadata?.sessionId ||
+        ""
+      ).trim();
+
+      if (!sessId || sessId === "null" || sessId === "undefined" || sessId === "none") return;
+
+      const cost = Number(log.total_cost_usd ?? log.cost_usd ?? log.cost ?? log.calculated_cost ?? 0);
+      const model = String(log.model || "gpt-4o").trim();
+      const agent = String(
+        log.agent_name ||
+        log.agent ||
+        log.metadata?.agent_name ||
+        log.metadata?.agent ||
+        rawPayload.agent_name ||
+        rawPayload.agent ||
+        rawPayload.metadata?.agent_name ||
+        "AgentTask"
+      ).trim();
+
+      const timestampStr = log.created_at || log.timestamp || new Date().toISOString();
+      const timeMs = new Date(timestampStr).getTime();
+      const latencyMs = Number(log.latency_ms || log.latency || 100);
+
+      if (!sessionMap[sessId]) {
+        sessionMap[sessId] = {
+          session_id: sessId,
+          agent_name: agent,
+          total_cost: 0,
+          call_count: 0,
+          models: new Set(),
+          first_time: timeMs,
+          last_time: timeMs,
+          total_latency_ms: 0,
+        };
+      }
+
+      const sess = sessionMap[sessId];
+      sess.total_cost += isNaN(cost) ? 0 : cost;
+      sess.call_count += 1;
+      sess.models.add(model);
+      sess.total_latency_ms += latencyMs;
+
+      if (timeMs < sess.first_time) sess.first_time = timeMs;
+      if (timeMs > sess.last_time) sess.last_time = timeMs;
+      if (agent && agent !== "default-agent" && agent !== "AgentTask" && (sess.agent_name === "default-agent" || sess.agent_name === "AgentTask")) {
+        sess.agent_name = agent;
+      }
+    });
+
+    const sessions: SessionRollupItem[] = Object.values(sessionMap)
+      .map((s) => {
+        let durationSec = Number(((s.last_time - s.first_time) / 1000).toFixed(1));
+        if (durationSec <= 0 && s.total_latency_ms > 0) {
+          durationSec = Number((s.total_latency_ms / 1000).toFixed(1));
+        }
+
+        return {
+          session_id: s.session_id,
+          agent_name: s.agent_name,
+          total_cost: Number(s.total_cost.toFixed(6)),
+          call_count: s.call_count,
+          models_used: Array.from(s.models).filter(Boolean),
+          start_time: new Date(s.first_time).toISOString(),
+          end_time: new Date(s.last_time).toISOString(),
+          duration_seconds: durationSec,
+        };
+      })
+      .sort((a, b) => new Date(b.end_time).getTime() - new Date(a.end_time).getTime());
+
+    return NextResponse.json({ success: true, sessions }, { headers: NO_CACHE_HEADERS });
+  } catch (error: any) {
+    console.error("Session rollups API Error:", error);
     return NextResponse.json(
-      { success: false, error: err?.message ?? String(err) },
-      { status: 500 }
+      { error: "Internal Server Error", details: error.message || String(error) },
+      { status: 500, headers: NO_CACHE_HEADERS }
     );
   }
 }
@@ -13602,277 +13848,6 @@ export async function GET(req: NextRequest) {
       user_id: r.user_id,
     })),
   });
-}
-</file>
-
-<file path="app/api/v1/otel/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase/admin";
-import { verifyApiKey } from "@/lib/auth/meterix";
-import { parseOtelSpans, MappedOtelSpan } from "@/lib/otel-adapter";
-import { getCacheReadMultiplier } from "@/lib/pricing";
-import { checkRateLimitAsync } from "@/lib/rate-limiter";
-import { checkMonthlyQuota } from "@/lib/quota";
-
-export const dynamic = "force-dynamic";
-
-function getCorsHeaders() {
-  return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key",
-  };
-}
-
-export async function OPTIONS() {
-  return NextResponse.json({}, { headers: getCorsHeaders() });
-}
-
-export async function POST(req: NextRequest) {
-  try {
-    // ── 1. Extract API Key from Authorization Bearer or x-api-key header ──
-    const authHeader = req.headers.get("authorization");
-    const xApiKey = req.headers.get("x-api-key");
-
-    let apiKey = "";
-    if (xApiKey && xApiKey.trim()) {
-      apiKey = xApiKey.trim();
-    } else if (authHeader && authHeader.startsWith("Bearer ")) {
-      apiKey = authHeader.substring(7).trim();
-    } else if (authHeader && authHeader !== "anonymous") {
-      apiKey = authHeader.trim();
-    }
-
-    apiKey = apiKey.replace(/^["']|["']$/g, "").trim();
-
-    if (!apiKey) {
-      console.log("[otel-route] Authentication failed: Missing API Key in Authorization or x-api-key header");
-      return NextResponse.json(
-        { error: "Unauthorized: Missing API Key in Authorization header or x-api-key" },
-        { status: 401, headers: getCorsHeaders() }
-      );
-    }
-
-    // ── 2. Authenticate API Key via SHA-256 hash lookup against api_keys table ──
-    const authResult = await verifyApiKey(apiKey);
-    if (!authResult.success || !authResult.apiKeyRecord) {
-      console.log("[otel-route] Authentication failed:", authResult.error);
-      return NextResponse.json(
-        { error: authResult.error || "Unauthorized: Invalid API Key" },
-        { status: 401, headers: getCorsHeaders() }
-      );
-    }
-
-    // Set default user_id associated with the validated API key
-    const keyRecord = authResult.apiKeyRecord;
-    const userId = authResult.userId || keyRecord.user_id || "anonymous";
-
-    // Resolve plan from public.profiles (single source of truth)
-    let userPlan = "free";
-    if (userId && userId !== "anonymous") {
-      try {
-        const { data: profile } = await supabaseAdmin
-          .from("profiles")
-          .select("plan")
-          .eq("id", userId)
-          .maybeSingle();
-
-        if (profile?.plan) {
-          userPlan = String(profile.plan).toLowerCase();
-        }
-      } catch (err) {
-        console.warn("[otel-route] Could not fetch plan:", err);
-      }
-    }
-
-    // ── 3. Post-Authentication Rate Limit Check ──────────────────────────────
-    const rateLimitIdentifier = `telemetry:${keyRecord.id || userId}`;
-    const rateLimitResult = await checkRateLimitAsync(rateLimitIdentifier, userPlan);
-
-    if (!rateLimitResult.allowed) {
-      const retryAfterSec = Math.ceil((rateLimitResult.retryAfterMs || 60000) / 1000);
-      return NextResponse.json(
-        { error: "Too Many Requests", message: "Rate limit exceeded." },
-        {
-          status: 429,
-          headers: {
-            ...getCorsHeaders(),
-            "Retry-After": String(retryAfterSec),
-            "X-RateLimit-Limit": String(rateLimitResult.limit),
-            "X-RateLimit-Remaining": String(Math.max(0, rateLimitResult.remaining)),
-            "X-RateLimit-Reset": String(Math.ceil((Date.now() + (rateLimitResult.retryAfterMs || 60000)) / 1000)),
-          },
-        }
-      );
-    }
-
-    // ── 4. Monthly Quota Limit Enforcement ──────────────────────────────────
-    const quotaResult = await checkMonthlyQuota(userId, userPlan);
-    if (!quotaResult.allowed) {
-      return NextResponse.json(
-        {
-          error: "Monthly log limit reached",
-          message: `Monthly limit of ${quotaResult.monthlyLimit.toLocaleString()} logs reached for ${userPlan} plan. Resets at the start of next month.`,
-          plan: userPlan,
-          usage: quotaResult.currentCount,
-          limit: quotaResult.monthlyLimit,
-        },
-        { status: 429, headers: getCorsHeaders() }
-      );
-    }
-
-    // ── 5. Budget Cap Circuit Breaker Check ──────────────────────────────────
-    const maxBudget = keyRecord.max_budget_usd !== null && keyRecord.max_budget_usd !== undefined
-      ? Number(keyRecord.max_budget_usd)
-      : (keyRecord.budget_cap_usd !== null && keyRecord.budget_cap_usd !== undefined
-        ? Number(keyRecord.budget_cap_usd)
-        : null);
-    const currentSpend = Number(keyRecord.current_period_spend_usd ?? 0);
-    const budgetAction = String(keyRecord.budget_action || keyRecord.budget_cap_action || "block_new_logs").toLowerCase();
-
-    if (maxBudget !== null && maxBudget > 0 && currentSpend >= maxBudget) {
-      if (budgetAction === "revoke_key") {
-        await supabaseAdmin
-          .from("api_keys")
-          .update({ is_active: false, status: "suspended" })
-          .eq("id", keyRecord.id);
-
-        return NextResponse.json(
-          { error: "Budget cap exceeded: API key has been suspended", action: "revoke_key" },
-          { status: 403, headers: getCorsHeaders() }
-        );
-      } else if (budgetAction !== "alert_only") {
-        return NextResponse.json(
-          { error: "Budget cap exceeded", action: "block_new_logs" },
-          { status: 402, headers: getCorsHeaders() }
-        );
-      }
-    }
-
-    // ── 6. Parse OTLP JSON Body safely ─────────────────────────────────────
-    const body = await req.json().catch((jsonErr) => {
-      console.warn("[otel-route] Invalid or empty JSON body received:", jsonErr);
-      return {};
-    });
-
-    let mappedSpans: MappedOtelSpan[] = [];
-    try {
-      mappedSpans = parseOtelSpans(body);
-    } catch (parseErr: any) {
-      console.error("[otel-route] Failed parsing OTLP resourceSpans payload:", parseErr);
-      mappedSpans = [];
-    }
-
-    if (mappedSpans.length === 0) {
-      // OTLP-compliant success response when no LLM spans matched in payload
-      return NextResponse.json({}, { status: 200, headers: getCorsHeaders() });
-    }
-
-    // ── 7. Process and Ingest Mapped Spans into usage_logs ─────────────────
-    const insertRows: Record<string, any>[] = [];
-
-    for (const span of mappedSpans) {
-      const modelKey = (span.model || "unknown-model").toLowerCase().trim();
-
-      // Look up dynamic model pricing
-      let inputRate = 1.0 / 1_000_000;
-      let outputRate = 3.0 / 1_000_000;
-      let isEstimated = true;
-      let provider = span.provider || "custom";
-
-      try {
-        let { data: pricingRow } = await supabaseAdmin
-          .from("model_pricing")
-          .select("input_price_per_million, output_price_per_million, provider")
-          .eq("model", modelKey)
-          .eq("is_active", true)
-          .maybeSingle();
-
-        if (!pricingRow) {
-          const { data: pricingByName } = await supabaseAdmin
-            .from("model_pricing")
-            .select("input_price_per_million, output_price_per_million, provider")
-            .eq("model_name", modelKey)
-            .eq("is_active", true)
-            .maybeSingle();
-          if (pricingByName) pricingRow = pricingByName;
-        }
-
-        if (pricingRow) {
-          isEstimated = false;
-          provider = pricingRow.provider || provider;
-          inputRate = pricingRow.input_price_per_million / 1_000_000;
-          outputRate = pricingRow.output_price_per_million / 1_000_000;
-        }
-      } catch (err) {
-        console.warn("[otel-route] DB model_pricing lookup notice:", err);
-      }
-
-      const cacheReadMult = getCacheReadMultiplier(provider, modelKey);
-      const cacheReadRate = inputRate * cacheReadMult;
-
-      const safeCached = Math.max(0, span.cached_tokens || 0);
-      const regularInput = Math.max(0, (span.prompt_tokens || 0) - safeCached);
-
-      const calculatedCost =
-        (regularInput * inputRate) +
-        (safeCached * cacheReadRate) +
-        ((span.completion_tokens || 0) * outputRate);
-
-      const roundedCost = Number(calculatedCost.toFixed(6));
-
-      insertRows.push({
-        user_id: userId,
-        model: span.model || "unknown-model",
-        provider,
-        input_tokens: Number(span.prompt_tokens || 0),
-        output_tokens: Number(span.completion_tokens || 0),
-        total_cost_usd: roundedCost,
-        latency_ms: Number(span.latency_ms || 0),
-        status_code: Number(span.status_code || 200),
-        is_estimated: isEstimated,
-        ...(span.session_id && { session_id: span.session_id }),
-        ...(span.agent_name && { agent_name: span.agent_name }),
-        ...(span.environment && { environment: span.environment }),
-      });
-    }
-
-    if (insertRows.length > 0) {
-      const { error: insertError } = await supabaseAdmin
-        .from("usage_logs")
-        .insert(insertRows);
-
-      if (insertError) {
-        console.error("[otel-route] Supabase insert error:", insertError.message, insertError.details);
-        return NextResponse.json(
-          { error: `Database insertion failed: ${insertError.message}` },
-          { status: 500, headers: getCorsHeaders() }
-        );
-      }
-
-      // Update API Key current_period_spend_usd
-      if (keyRecord?.id) {
-        const totalBatchCost = insertRows.reduce((acc, r) => acc + Number(r.total_cost_usd || 0), 0);
-        if (totalBatchCost > 0) {
-          const newSpend = Number((currentSpend + totalBatchCost).toFixed(6));
-          await supabaseAdmin
-            .from("api_keys")
-            .update({ current_period_spend_usd: newSpend })
-            .eq("id", keyRecord.id);
-        }
-      }
-    }
-
-    // ── 8. Return OTLP-compliant success response ({}) with HTTP 200 ──────
-    return NextResponse.json({}, { status: 200, headers: getCorsHeaders() });
-  } catch (error: any) {
-    const errorMessage = error?.message || String(error) || "Internal Server Error";
-    console.error("[otel-route] 500 Internal Error during OTLP trace ingestion:", error);
-    return NextResponse.json(
-      { error: errorMessage },
-      { status: 500, headers: getCorsHeaders() }
-    );
-  }
 }
 </file>
 
@@ -14327,218 +14302,123 @@ export function LoginPageContent({ initialMode = "login" }: { initialMode?: Auth
 }
 </file>
 
-<file path="app/api/customer-profitability/route.ts">
+<file path="package.json">
+{
+  "name": "meterix",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@react-email/components": "^1.0.12",
+    "@react-email/render": "^2.1.0",
+    "@supabase/ssr": "^0.12.4",
+    "@supabase/supabase-js": "^2.45.0",
+    "@upstash/ratelimit": "^2.1.0",
+    "@upstash/redis": "^1.38.4",
+    "lucide-react": "^0.428.0",
+    "next": "14.2.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-email": "^6.9.5",
+    "recharts": "^2.15.4",
+    "resend": "^6.27.0",
+    "server-only": "^0.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.12",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.41",
+    "tailwindcss": "^3.4.10",
+    "typescript": "^5.5.4"
+  }
+}
+</file>
+
+<file path="app/api/cron/reset-budget-caps/route.ts">
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export type RevenueSource = "lemonsqueezy_active" | "plan_estimate" | "free";
-
-export interface CustomerMarginItem {
-  user_id: string;
-  email: string;
-  lemon_squeezy_customer_id: string | null;
-  lemon_squeezy_subscription_id: string | null;
-  plan: string;
-  subscription_status: string | null;
-  revenue: number;
-  revenue_source: RevenueSource;
-  is_revenue_estimated: boolean;
-  total_cost: number;
-  margin: number;
-  margin_percentage: number;
-  status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account";
-  log_count: number;
-  last_synced_at: string;
+export async function GET(req: NextRequest) {
+  return handleResetBudgetCaps(req);
 }
 
-/**
- * Calculates customer margin metrics for a single specific user.
- * Scoped strictly to the target userId (does not perform full-platform scans).
- */
-async function calculateSingleCustomerMargin(
-  userId: string,
-  userEmail?: string
-): Promise<CustomerMarginItem> {
-  const nowIso = new Date().toISOString();
+export async function POST(req: NextRequest) {
+  return handleResetBudgetCaps(req);
+}
 
-  // 1. Resolve Lemon Squeezy Pro pricing (env fallback)
-  const lsFallbackPriceUSD = Number(process.env.LEMONSQUEEZY_PRO_PRICE_USD ?? 29);
-  let proPriceUSD = lsFallbackPriceUSD;
-  let proPriceIsLive = false;
+async function handleResetBudgetCaps(req: NextRequest) {
+  const cronSecret = process.env.CRON_SECRET;
 
-  const lsApiKey = process.env.LEMONSQUEEZY_API_KEY || "";
-  const lsVariantId = process.env.LEMONSQUEEZY_PRO_VARIANT_ID || "";
+  // Fail closed, unconditionally — no environment-based carve-out.
+  // A missing secret must never be treated as "open" in any environment.
+  if (!cronSecret) {
+    console.error("[reset-budget-caps] CRON_SECRET is not configured — refusing to run.");
+    return NextResponse.json(
+      { error: "CRON_SECRET environment variable missing on server" },
+      { status: 500 }
+    );
+  }
 
-  if (lsApiKey && lsVariantId) {
-    try {
-      const res = await fetch(
-        `https://api.lemonsqueezy.com/v1/variants/${encodeURIComponent(lsVariantId)}`,
-        {
-          headers: {
-            Authorization: `Bearer ${lsApiKey}`,
-            Accept: "application/vnd.api+json",
-          },
-        }
+  // Header-only auth. Secrets never travel in the URL (logs/Referer leakage).
+  const authHeader = req.headers.get("authorization");
+  if (authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  try {
+    const { data, error } = await supabaseAdmin
+      .from("api_keys")
+      .update({ current_period_spend_usd: 0, budget_alert_sent: false })
+      .neq("id", "00000000-0000-0000-0000-000000000000")
+      .select("id");
+
+    if (error) {
+      console.error("[reset-budget-caps] Supabase db error during reset:", error);
+      return NextResponse.json(
+        { success: false, db_error: error.message },
+        { status: 500 }
       );
-      if (res.ok) {
-        const data = await res.json();
-        const priceCents: number | undefined = data?.data?.attributes?.price;
-        if (typeof priceCents === "number" && priceCents > 0) {
-          proPriceUSD = Number((priceCents / 100).toFixed(2));
-          proPriceIsLive = true;
-        }
-      }
-    } catch (err) {
-      console.warn(`[customer-profitability] Variant price fetch notice for ${userId}:`, err);
     }
-  }
 
-  // 2. Fetch profile data specifically for this user
-  let email = userEmail || "user@example.com";
-  let plan = "free";
-  let subscriptionStatus: string | null = null;
-  let lemonSqueezyCustomerId: string | null = null;
-  let lemonSqueezySubscriptionId: string | null = null;
-
-  try {
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("email, plan, subscription_status, lemon_squeezy_customer_id, lemon_squeezy_subscription_id")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profile) {
-      if (profile.email) email = profile.email;
-      if (profile.plan) plan = String(profile.plan).toLowerCase();
-      subscriptionStatus = profile.subscription_status ? String(profile.subscription_status) : null;
-      lemonSqueezyCustomerId = profile.lemon_squeezy_customer_id ? String(profile.lemon_squeezy_customer_id) : null;
-      lemonSqueezySubscriptionId = profile.lemon_squeezy_subscription_id ? String(profile.lemon_squeezy_subscription_id) : null;
-    } else {
-      // Fallback: lookup user in auth.users
-      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(userId);
-      if (authUser?.user?.email) {
-        email = authUser.user.email;
-      }
-    }
-  } catch (err) {
-    console.warn(`[customer-profitability] Profile fetch notice for ${userId}:`, err);
-  }
-
-  // 3. Aggregate LLM usage log costs specifically for this user
-  let totalCost = 0;
-  let logCount = 0;
-
-  try {
-    const { data: logs, error: logsErr } = await supabaseAdmin
-      .from("usage_logs")
-      .select("total_cost_usd, cost")
-      .eq("user_id", userId);
-
-    if (!logsErr && logs) {
-      logCount = logs.length;
-      logs.forEach((log: any) => {
-        const cost = Number(log.total_cost_usd ?? log.cost ?? 0);
-        if (!isNaN(cost)) {
-          totalCost += cost;
-        }
-      });
-    }
-  } catch (err) {
-    console.warn(`[customer-profitability] usage_logs query notice for ${userId}:`, err);
-  }
-
-  // 4. Compute revenue & margins
-  let revenue = 0;
-  let revenueSource: RevenueSource = "free";
-  let isRevenueEstimated = false;
-
-  const isActivePro =
-    plan === "pro" &&
-    (subscriptionStatus === "active" || subscriptionStatus === "on_trial");
-
-  const isInactivePro = plan === "pro" && !isActivePro;
-
-  if (isActivePro) {
-    revenue = proPriceUSD;
-    revenueSource = "lemonsqueezy_active";
-    isRevenueEstimated = !proPriceIsLive;
-  } else if (isInactivePro) {
-    revenue = proPriceUSD;
-    revenueSource = "plan_estimate";
-    isRevenueEstimated = true;
-  } else {
-    revenue = 0;
-    revenueSource = "free";
-    isRevenueEstimated = false;
-  }
-
-  const roundedTotalCost = Number(totalCost.toFixed(4));
-  const margin = Number((revenue - roundedTotalCost).toFixed(4));
-
-  let marginPercentage = 0;
-  if (revenue > 0) {
-    marginPercentage = Number(((margin / revenue) * 100).toFixed(1));
-  } else if (roundedTotalCost > 0) {
-    marginPercentage = -100;
-  }
-
-  let status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account" = "profitable";
-  if (revenue === 0 && roundedTotalCost === 0) {
-    status = "no_data";
-  } else if (margin < 0) {
-    status = "unprofitable";
-  } else if (marginPercentage < 30 || margin < 10) {
-    status = "low_margin";
-  }
-
-  const marginItem: CustomerMarginItem = {
-    user_id: userId,
-    email,
-    lemon_squeezy_customer_id: lemonSqueezyCustomerId,
-    lemon_squeezy_subscription_id: lemonSqueezySubscriptionId,
-    plan,
-    subscription_status: subscriptionStatus,
-    revenue,
-    revenue_source: revenueSource,
-    is_revenue_estimated: isRevenueEstimated,
-    total_cost: roundedTotalCost,
-    margin,
-    margin_percentage: marginPercentage,
-    status,
-    log_count: logCount,
-    last_synced_at: nowIso,
-  };
-
-  // 5. Upsert single user margin record into customer_margins table
-  try {
-    await supabaseAdmin.from("customer_margins").upsert([
+    return NextResponse.json(
       {
-        user_id: marginItem.user_id,
-        email: marginItem.email,
-        lemon_squeezy_customer_id: marginItem.lemon_squeezy_customer_id,
-        lemon_squeezy_subscription_id: marginItem.lemon_squeezy_subscription_id,
-        plan: marginItem.plan,
-        subscription_status: marginItem.subscription_status,
-        revenue: marginItem.revenue,
-        revenue_source: marginItem.revenue_source,
-        is_revenue_estimated: marginItem.is_revenue_estimated,
-        total_cost: marginItem.total_cost,
-        margin: marginItem.margin,
-        margin_percentage: marginItem.margin_percentage,
-        status: marginItem.status,
-        updated_at: nowIso,
+        success: true,
+        message: "Reset completed",
+        updated_count: data?.length ?? 0,
       },
-    ]);
-  } catch (err) {
-    console.warn(`[customer-profitability] Upsert notice for ${userId}:`, err);
+      { status: 200, headers: { "Cache-Control": "no-store, max-age=0" } }
+    );
+  } catch (err: any) {
+    console.error("[reset-budget-caps] Cron reset error:", err);
+    return NextResponse.json(
+      { success: false, error: err?.message ?? String(err) },
+      { status: 500 }
+    );
   }
-
-  return marginItem;
 }
+</file>
+
+<file path="app/api/customer-profitability/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@/utils/supabase/server";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import {
+  calculateSingleCustomerMargin,
+  type CustomerMarginItem,
+} from "@/lib/customer-profitability";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET(req: NextRequest) {
   const NO_CACHE_HEADERS = {
@@ -14601,346 +14481,279 @@ export async function GET(req: NextRequest) {
 }
 </file>
 
-<file path="app/api/plan/route.ts">
+<file path="app/api/v1/otel/route.ts">
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
-import { getStartOfCurrentMonthISO } from "@/lib/quota";
+import { verifyApiKey } from "@/lib/auth/meterix";
+import { parseOtelSpans, MappedOtelSpan } from "@/lib/otel-adapter";
+import { getCacheReadMultiplier } from "@/lib/pricing";
+import { checkRateLimitAsync } from "@/lib/rate-limiter";
+import { checkMonthlyQuota } from "@/lib/quota";
 
 export const dynamic = "force-dynamic";
-export const revalidate = 0;
-export const fetchCache = "force-no-store";
 
-const TIER_LIMITS: Record<string, { name: string; limit: number; label: string }> = {
-  free: { name: "Free Sandbox", limit: 5000, label: "5,000 logs/mo" },
-  pro: { name: "Pro Tier", limit: 500000, label: "500,000 logs/mo" },
-};
-
-export async function GET(req: NextRequest) {
-  const supabase = createClient();
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-  const NO_CACHE_HEADERS = {
-    "Cache-Control": "no-store, max-age=0",
-    "CDN-Cache-Control": "no-store",
-    "Vercel-CDN-Cache-Control": "no-store",
+function getCorsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key",
   };
+}
 
-  if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_CACHE_HEADERS });
-  }
+export async function OPTIONS() {
+  return NextResponse.json({}, { headers: getCorsHeaders() });
+}
 
+export async function POST(req: NextRequest) {
   try {
-    // Read plan: check public.profiles (single source of truth)
-    let rawPlan = "free";
+    // ── 1. Extract API Key from Authorization Bearer or x-api-key header ──
+    const authHeader = req.headers.get("authorization");
+    const xApiKey = req.headers.get("x-api-key");
 
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("plan")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (profile?.plan) {
-      rawPlan = String(profile.plan).toLowerCase();
+    let apiKey = "";
+    if (xApiKey && xApiKey.trim()) {
+      apiKey = xApiKey.trim();
+    } else if (authHeader && authHeader.startsWith("Bearer ")) {
+      apiKey = authHeader.substring(7).trim();
+    } else if (authHeader && authHeader !== "anonymous") {
+      apiKey = authHeader.trim();
     }
 
-    const planKey = rawPlan in TIER_LIMITS ? rawPlan : "free";
-    const tier = TIER_LIMITS[planKey];
+    apiKey = apiKey.replace(/^["']|["']$/g, "").trim();
 
-    // Count monthly log usage for this user
-    const firstDayOfMonth = getStartOfCurrentMonthISO();
-
-    const { count } = await supabaseAdmin
-      .from("usage_logs")
-      .select("id", { count: "exact", head: true })
-      .or(`user_id.eq.${user.id},user_id.is.null`)
-      .gte("created_at", firstDayOfMonth);
-
-    const usageCount = count ?? 0;
-    const percentage = Math.min(100, Number(((usageCount / tier.limit) * 100).toFixed(1)));
-    const remaining = Math.max(0, tier.limit - usageCount);
-
-    return NextResponse.json(
-      {
-        plan: planKey,
-        tierName: tier.name,
-        limit: tier.limit,
-        limitLabel: tier.label,
-        usage: usageCount,
-        percentage,
-        remaining,
-      },
-      { headers: NO_CACHE_HEADERS }
-    );
-  } catch (err: any) {
-    console.error("plan GET exception:", err);
-    return NextResponse.json({ error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
-  }
-}
-
-export async function POST() {
-  return NextResponse.json(
-    { error: "Method not allowed. Plan upgrades must be completed via Lemon Squeezy checkout." },
-    {
-      status: 405,
-      headers: {
-        "Cache-Control": "no-store, max-age=0",
-        "CDN-Cache-Control": "no-store",
-        "Vercel-CDN-Cache-Control": "no-store",
-      },
-    }
-  );
-}
-</file>
-
-<file path="app/api/session-rollups/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
-import { supabaseAdmin } from "@/lib/supabase/admin";
-
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
-
-export interface SessionRollupItem {
-  session_id: string;
-  agent_name: string;
-  total_cost: number;
-  call_count: number;
-  models_used: string[];
-  start_time: string;
-  end_time: string;
-  duration_seconds: number;
-}
-
-export async function GET(req: NextRequest) {
-  const supabase = createClient();
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
-
-  const NO_CACHE_HEADERS = {
-    "Cache-Control": "no-store, max-age=0",
-    "CDN-Cache-Control": "no-store",
-    "Vercel-CDN-Cache-Control": "no-store",
-  };
-
-  if (authError || !user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_CACHE_HEADERS });
-  }
-
-  try {
-    // 1. Primary lookup: Query Postgres view/table `session_cost_rollup` strictly scoped to user.id
-    const PAGE_SIZE = 1000;
-    let viewRows: any[] = [];
-    let viewFrom = 0;
-    let hasViewError = false;
-
-    while (true) {
-      const { data: viewPage, error: viewError } = await supabaseAdmin
-        .from("session_cost_rollup")
-        .select("*")
-        .eq("user_id", user.id)
-        .range(viewFrom, viewFrom + PAGE_SIZE - 1);
-
-      if (viewError) {
-        hasViewError = true;
-        break;
-      }
-      if (!viewPage || viewPage.length === 0) break;
-
-      viewRows.push(...viewPage);
-      if (viewPage.length < PAGE_SIZE) break;
-      viewFrom += PAGE_SIZE;
+    if (!apiKey) {
+      console.log("[otel-route] Authentication failed: Missing API Key in Authorization or x-api-key header");
+      return NextResponse.json(
+        { error: "Unauthorized: Missing API Key in Authorization header or x-api-key" },
+        { status: 401, headers: getCorsHeaders() }
+      );
     }
 
-    if (!hasViewError && viewRows.length > 0) {
-      const userViewRows = viewRows.filter((row: any) => {
-        if (row.user_id !== user.id) return false;
-        const sid = String(row.session_id || "").trim();
-        return sid.length > 0 && sid !== "null" && sid !== "undefined";
-      });
+    // ── 2. Authenticate API Key via SHA-256 hash lookup against api_keys table ──
+    const authResult = await verifyApiKey(apiKey);
+    if (!authResult.success || !authResult.apiKeyRecord) {
+      console.log("[otel-route] Authentication failed:", authResult.error);
+      return NextResponse.json(
+        { error: authResult.error || "Unauthorized: Invalid API Key" },
+        { status: 401, headers: getCorsHeaders() }
+      );
+    }
 
-      if (userViewRows.length > 0) {
-        const formattedFromView: SessionRollupItem[] = userViewRows.map((row: any) => {
-          const rawModels = Array.isArray(row.models_used)
-            ? row.models_used
-            : typeof row.models_used === "string"
-            ? row.models_used.split(",").map((m: string) => m.trim())
-            : [row.model || "gpt-4o"];
+    // Set default user_id associated with the validated API key
+    const keyRecord = authResult.apiKeyRecord;
+    const userId = authResult.userId || keyRecord.user_id || "anonymous";
 
-          const startTime = new Date(row.start_time || row.first_call || row.created_at || Date.now());
-          const endTime = new Date(row.end_time || row.last_call || row.created_at || Date.now());
-          let durationSec = Number(row.duration_seconds ?? row.duration ?? 0);
+    // Resolve plan from public.profiles (single source of truth)
+    let userPlan = "free";
+    if (userId && userId !== "anonymous") {
+      try {
+        const { data: profile } = await supabaseAdmin
+          .from("profiles")
+          .select("plan")
+          .eq("id", userId)
+          .maybeSingle();
 
-          if (!durationSec && startTime && endTime) {
-            durationSec = Math.max(0, Number(((endTime.getTime() - startTime.getTime()) / 1000).toFixed(1)));
-          }
-
-          return {
-            session_id: String(row.session_id).trim(),
-            agent_name: String(row.agent_name || row.agent || "AgentTask").trim(),
-            total_cost: Number(Number(row.total_cost ?? row.total_cost_usd ?? row.cost ?? 0).toFixed(6)),
-            call_count: Number(row.call_count ?? row.total_calls ?? row.calls ?? 1),
-            models_used: Array.from(new Set(rawModels.filter(Boolean))),
-            start_time: startTime.toISOString(),
-            end_time: endTime.toISOString(),
-            duration_seconds: durationSec,
-          };
-        });
-
-        return NextResponse.json({ success: true, sessions: formattedFromView }, { headers: NO_CACHE_HEADERS });
+        if (profile?.plan) {
+          userPlan = String(profile.plan).toLowerCase();
+        }
+      } catch (err) {
+        console.warn("[otel-route] Could not fetch plan:", err);
       }
     }
 
-    // 2. Secondary fallback: Query usage_logs strictly scoped to user.id (paginated)
-    let logs: any[] = [];
-    let logsFrom = 0;
+    // ── 3. Post-Authentication Rate Limit Check ──────────────────────────────
+    const rateLimitIdentifier = `telemetry:${keyRecord.id || userId}`;
+    const rateLimitResult = await checkRateLimitAsync(rateLimitIdentifier, userPlan);
 
-    while (true) {
-      const { data: logsPage, error: logsError } = await supabaseAdmin
-        .from("usage_logs")
-        .select("*")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: true })
-        .range(logsFrom, logsFrom + PAGE_SIZE - 1);
-
-      if (logsError) {
-        console.warn("session-rollups usage_logs query notice:", logsError.message);
-        break;
-      }
-
-      if (!logsPage || logsPage.length === 0) break;
-      logs.push(...logsPage);
-      if (logsPage.length < PAGE_SIZE) break;
-      logsFrom += PAGE_SIZE;
+    if (!rateLimitResult.allowed) {
+      const retryAfterSec = Math.ceil((rateLimitResult.retryAfterMs || 60000) / 1000);
+      return NextResponse.json(
+        { error: "Too Many Requests", message: "Rate limit exceeded." },
+        {
+          status: 429,
+          headers: {
+            ...getCorsHeaders(),
+            "Retry-After": String(retryAfterSec),
+            "X-RateLimit-Limit": String(rateLimitResult.limit),
+            "X-RateLimit-Remaining": String(Math.max(0, rateLimitResult.remaining)),
+            "X-RateLimit-Reset": String(Math.ceil((Date.now() + (rateLimitResult.retryAfterMs || 60000)) / 1000)),
+          },
+        }
+      );
     }
 
-    let allLogs = logs;
+    // ── 4. Monthly Quota Limit Enforcement ──────────────────────────────────
+    const quotaResult = await checkMonthlyQuota(userId, userPlan);
+    if (!quotaResult.allowed) {
+      return NextResponse.json(
+        {
+          error: "Monthly log limit reached",
+          message: `Monthly limit of ${quotaResult.monthlyLimit.toLocaleString()} logs reached for ${userPlan} plan. Resets at the start of next month.`,
+          plan: userPlan,
+          usage: quotaResult.currentCount,
+          limit: quotaResult.monthlyLimit,
+        },
+        { status: 429, headers: getCorsHeaders() }
+      );
+    }
 
-    // Fallback check to telemetry_logs strictly scoped to user.id if usage_logs is empty (paginated)
-    if (allLogs.length === 0) {
-      const tLogs: any[] = [];
-      let tLogsFrom = 0;
+    // ── 5. Budget Cap Circuit Breaker Check ──────────────────────────────────
+    const maxBudget = keyRecord.max_budget_usd !== null && keyRecord.max_budget_usd !== undefined
+      ? Number(keyRecord.max_budget_usd)
+      : (keyRecord.budget_cap_usd !== null && keyRecord.budget_cap_usd !== undefined
+        ? Number(keyRecord.budget_cap_usd)
+        : null);
+    const currentSpend = Number(keyRecord.current_period_spend_usd ?? 0);
+    const budgetAction = String(keyRecord.budget_action || keyRecord.budget_cap_action || "block_new_logs").toLowerCase();
 
-      while (true) {
-        const { data: tLogsPage, error: tLogsError } = await supabaseAdmin
-          .from("telemetry_logs")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: true })
-          .range(tLogsFrom, tLogsFrom + PAGE_SIZE - 1);
+    if (maxBudget !== null && maxBudget > 0 && currentSpend >= maxBudget) {
+      if (budgetAction === "revoke_key") {
+        await supabaseAdmin
+          .from("api_keys")
+          .update({ is_active: false, status: "suspended" })
+          .eq("id", keyRecord.id);
 
-        if (tLogsError || !tLogsPage || tLogsPage.length === 0) break;
-        tLogs.push(...tLogsPage);
-        if (tLogsPage.length < PAGE_SIZE) break;
-        tLogsFrom += PAGE_SIZE;
-      }
-
-      if (tLogs.length > 0) {
-        allLogs = tLogs;
+        return NextResponse.json(
+          { error: "Budget cap exceeded: API key has been suspended", action: "revoke_key" },
+          { status: 403, headers: getCorsHeaders() }
+        );
+      } else if (budgetAction !== "alert_only") {
+        return NextResponse.json(
+          { error: "Budget cap exceeded", action: "block_new_logs" },
+          { status: 402, headers: getCorsHeaders() }
+        );
       }
     }
 
-    const sessionMap: Record<
-      string,
-      {
-        session_id: string;
-        agent_name: string;
-        total_cost: number;
-        call_count: number;
-        models: Set<string>;
-        first_time: number;
-        last_time: number;
-        total_latency_ms: number;
-      }
-    > = {};
-
-    allLogs.forEach((log) => {
-      const rawPayload = log.raw_payload || log.metadata || {};
-      const sessId = String(
-        log.session_id ||
-        log.sessionId ||
-        log.metadata?.session_id ||
-        log.metadata?.sessionId ||
-        rawPayload.session_id ||
-        rawPayload.sessionId ||
-        rawPayload.metadata?.session_id ||
-        rawPayload.metadata?.sessionId ||
-        ""
-      ).trim();
-
-      if (!sessId || sessId === "null" || sessId === "undefined" || sessId === "none") return;
-
-      const cost = Number(log.total_cost_usd ?? log.cost_usd ?? log.cost ?? log.calculated_cost ?? 0);
-      const model = String(log.model || "gpt-4o").trim();
-      const agent = String(
-        log.agent_name ||
-        log.agent ||
-        log.metadata?.agent_name ||
-        log.metadata?.agent ||
-        rawPayload.agent_name ||
-        rawPayload.agent ||
-        rawPayload.metadata?.agent_name ||
-        "AgentTask"
-      ).trim();
-
-      const timestampStr = log.created_at || log.timestamp || new Date().toISOString();
-      const timeMs = new Date(timestampStr).getTime();
-      const latencyMs = Number(log.latency_ms || log.latency || 100);
-
-      if (!sessionMap[sessId]) {
-        sessionMap[sessId] = {
-          session_id: sessId,
-          agent_name: agent,
-          total_cost: 0,
-          call_count: 0,
-          models: new Set(),
-          first_time: timeMs,
-          last_time: timeMs,
-          total_latency_ms: 0,
-        };
-      }
-
-      const sess = sessionMap[sessId];
-      sess.total_cost += isNaN(cost) ? 0 : cost;
-      sess.call_count += 1;
-      sess.models.add(model);
-      sess.total_latency_ms += latencyMs;
-
-      if (timeMs < sess.first_time) sess.first_time = timeMs;
-      if (timeMs > sess.last_time) sess.last_time = timeMs;
-      if (agent && agent !== "default-agent" && agent !== "AgentTask" && (sess.agent_name === "default-agent" || sess.agent_name === "AgentTask")) {
-        sess.agent_name = agent;
-      }
+    // ── 6. Parse OTLP JSON Body safely ─────────────────────────────────────
+    const body = await req.json().catch((jsonErr) => {
+      console.warn("[otel-route] Invalid or empty JSON body received:", jsonErr);
+      return {};
     });
 
-    const sessions: SessionRollupItem[] = Object.values(sessionMap)
-      .map((s) => {
-        let durationSec = Number(((s.last_time - s.first_time) / 1000).toFixed(1));
-        if (durationSec <= 0 && s.total_latency_ms > 0) {
-          durationSec = Number((s.total_latency_ms / 1000).toFixed(1));
+    let mappedSpans: MappedOtelSpan[] = [];
+    try {
+      mappedSpans = parseOtelSpans(body);
+    } catch (parseErr: any) {
+      console.error("[otel-route] Failed parsing OTLP resourceSpans payload:", parseErr);
+      mappedSpans = [];
+    }
+
+    if (mappedSpans.length === 0) {
+      // OTLP-compliant success response when no LLM spans matched in payload
+      return NextResponse.json({}, { status: 200, headers: getCorsHeaders() });
+    }
+
+    // ── 7. Process and Ingest Mapped Spans into usage_logs ─────────────────
+    const insertRows: Record<string, any>[] = [];
+
+    for (const span of mappedSpans) {
+      const modelKey = (span.model || "unknown-model").toLowerCase().trim();
+
+      // Look up dynamic model pricing
+      let inputRate = 1.0 / 1_000_000;
+      let outputRate = 3.0 / 1_000_000;
+      let isEstimated = true;
+      let provider = span.provider || "custom";
+
+      try {
+        let { data: pricingRow } = await supabaseAdmin
+          .from("model_pricing")
+          .select("input_price_per_million, output_price_per_million, provider")
+          .eq("model", modelKey)
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (!pricingRow) {
+          const { data: pricingByName } = await supabaseAdmin
+            .from("model_pricing")
+            .select("input_price_per_million, output_price_per_million, provider")
+            .eq("model_name", modelKey)
+            .eq("is_active", true)
+            .maybeSingle();
+          if (pricingByName) pricingRow = pricingByName;
         }
 
-        return {
-          session_id: s.session_id,
-          agent_name: s.agent_name,
-          total_cost: Number(s.total_cost.toFixed(6)),
-          call_count: s.call_count,
-          models_used: Array.from(s.models).filter(Boolean),
-          start_time: new Date(s.first_time).toISOString(),
-          end_time: new Date(s.last_time).toISOString(),
-          duration_seconds: durationSec,
-        };
-      })
-      .sort((a, b) => new Date(b.end_time).getTime() - new Date(a.end_time).getTime());
+        if (pricingRow) {
+          isEstimated = false;
+          provider = pricingRow.provider || provider;
+          inputRate = pricingRow.input_price_per_million / 1_000_000;
+          outputRate = pricingRow.output_price_per_million / 1_000_000;
+        }
+      } catch (err) {
+        console.warn("[otel-route] DB model_pricing lookup notice:", err);
+      }
 
-    return NextResponse.json({ success: true, sessions }, { headers: NO_CACHE_HEADERS });
+      const cacheReadMult = getCacheReadMultiplier(provider, modelKey);
+      const cacheReadRate = inputRate * cacheReadMult;
+
+      const safeCached = Math.max(0, span.cached_tokens || 0);
+      const regularInput = Math.max(0, (span.prompt_tokens || 0) - safeCached);
+
+      const calculatedCost =
+        (regularInput * inputRate) +
+        (safeCached * cacheReadRate) +
+        ((span.completion_tokens || 0) * outputRate);
+
+      const roundedCost = Number(calculatedCost.toFixed(6));
+
+      insertRows.push({
+        user_id: userId,
+        model: span.model || "unknown-model",
+        provider,
+        input_tokens: Number(span.prompt_tokens || 0),
+        output_tokens: Number(span.completion_tokens || 0),
+        total_cost_usd: roundedCost,
+        latency_ms: Number(span.latency_ms || 0),
+        status_code: Number(span.status_code || 200),
+        is_estimated: isEstimated,
+        ...(span.session_id && { session_id: span.session_id }),
+        ...(span.agent_name && { agent_name: span.agent_name }),
+        ...(span.environment && { environment: span.environment }),
+      });
+    }
+
+    if (insertRows.length > 0) {
+      const { error: insertError } = await supabaseAdmin
+        .from("usage_logs")
+        .insert(insertRows);
+
+      if (insertError) {
+        console.error("[otel-route] Supabase insert error:", insertError.message, insertError.details);
+        return NextResponse.json(
+          { error: `Database insertion failed: ${insertError.message}` },
+          { status: 500, headers: getCorsHeaders() }
+        );
+      }
+
+      // Update API Key current_period_spend_usd
+      if (keyRecord?.id) {
+        const totalBatchCost = insertRows.reduce((acc, r) => acc + Number(r.total_cost_usd || 0), 0);
+        if (totalBatchCost > 0) {
+          const roundedCost = totalBatchCost;
+          try {
+            const { error: rpcErr } = await supabaseAdmin.rpc("increment_key_spend", {
+              key_id: keyRecord.id,
+              amount: roundedCost,
+            });
+            if (rpcErr) {
+              console.warn("[otel] increment_key_spend RPC error:", rpcErr.message);
+            }
+          } catch (rpcErr) {
+            console.warn("[otel] increment_key_spend RPC exception:", rpcErr);
+          }
+        }
+      }
+    }
+
+    // ── 8. Return OTLP-compliant success response ({}) with HTTP 200 ──────
+    return NextResponse.json({}, { status: 200, headers: getCorsHeaders() });
   } catch (error: any) {
-    console.error("Session rollups API Error:", error);
+    const errorMessage = error?.message || String(error) || "Internal Server Error";
+    console.error("[otel-route] 500 Internal Error during OTLP trace ingestion:", error);
     return NextResponse.json(
-      { error: "Internal Server Error", details: error.message || String(error) },
-      { status: 500, headers: NO_CACHE_HEADERS }
+      { error: errorMessage },
+      { status: 500, headers: getCorsHeaders() }
     );
   }
 }
@@ -16364,64 +16177,6 @@ export const config = {
 };
 </file>
 
-<file path="app/api/v1/ingest/route.ts">
-import { NextRequest, NextResponse } from "next/server";
-import { POST as telemetryPOST } from "@/app/api/v1/telemetry/route";
-
-export const dynamic = "force-dynamic";
-
-function getCorsHeaders() {
-  return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key, x-key-id",
-  };
-}
-
-export async function OPTIONS() {
-  return NextResponse.json({}, { headers: getCorsHeaders() });
-}
-
-/**
- * Delegate ingestion to the canonical /api/v1/telemetry route provider.
- * Guarantees server-side model pricing calculation via model_pricing DB lookups
- * and prevents reliance on client-reported cost fields.
- */
-export async function POST(req: NextRequest) {
-  try {
-    const response = await telemetryPOST(req);
-
-    // If telemetryPOST returned an error status (e.g. 401, 429, 400, 402, 403, 500),
-    // pass through the response directly with status and headers intact.
-    if (!response.ok) {
-      return response;
-    }
-
-    // Parse the successful canonical telemetry payload
-    const data = await response.json();
-
-    // Augment with backward-compatible response fields expected by legacy /api/v1/ingest callers
-    return NextResponse.json(
-      {
-        ...data,
-        message: "Telemetry ingested successfully",
-        total_cost_usd: data.calculated_cost ?? data.total_cost_usd ?? 0,
-      },
-      {
-        status: 200,
-        headers: response.headers,
-      }
-    );
-  } catch (error: any) {
-    console.error("[ingest-wrapper] Error delegating to canonical telemetry route:", error);
-    return NextResponse.json(
-      { error: "Internal Server Error", details: error.message || String(error) },
-      { status: 500, headers: getCorsHeaders() }
-    );
-  }
-}
-</file>
-
 <file path="app/api/v1/cron/stripe-sync/route.ts">
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
@@ -16839,6 +16594,64 @@ async function syncSingleCustomer(
     return NextResponse.json(
       { error: "Internal Server Error", details: error.message || String(error) },
       { status: 500, headers: NO_CACHE_HEADERS }
+    );
+  }
+}
+</file>
+
+<file path="app/api/v1/ingest/route.ts">
+import { NextRequest, NextResponse } from "next/server";
+import { POST as telemetryPOST } from "@/app/api/v1/telemetry/route";
+
+export const dynamic = "force-dynamic";
+
+function getCorsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key, x-key-id",
+  };
+}
+
+export async function OPTIONS() {
+  return NextResponse.json({}, { headers: getCorsHeaders() });
+}
+
+/**
+ * Delegate ingestion to the canonical /api/v1/telemetry route provider.
+ * Guarantees server-side model pricing calculation via model_pricing DB lookups
+ * and prevents reliance on client-reported cost fields.
+ */
+export async function POST(req: NextRequest) {
+  try {
+    const response = await telemetryPOST(req);
+
+    // If telemetryPOST returned an error status (e.g. 401, 429, 400, 402, 403, 500),
+    // pass through the response directly with status and headers intact.
+    if (!response.ok) {
+      return response;
+    }
+
+    // Parse the successful canonical telemetry payload
+    const data = await response.json();
+
+    // Augment with backward-compatible response fields expected by legacy /api/v1/ingest callers
+    return NextResponse.json(
+      {
+        ...data,
+        message: "Telemetry ingested successfully",
+        total_cost_usd: data.calculated_cost ?? data.total_cost_usd ?? 0,
+      },
+      {
+        status: 200,
+        headers: response.headers,
+      }
+    );
+  } catch (error: any) {
+    console.error("[ingest-wrapper] Error delegating to canonical telemetry route:", error);
+    return NextResponse.json(
+      { error: "Internal Server Error", details: error.message || String(error) },
+      { status: 500, headers: getCorsHeaders() }
     );
   }
 }
@@ -19898,10 +19711,17 @@ export async function POST(req: NextRequest) {
           );
         } else if (budgetAction === "alert_only") {
           budgetWarning = "Budget cap exceeded for this API key";
-          await supabaseAdmin
-            .from("api_keys")
-            .update({ current_period_spend_usd: newSpend })
-            .eq("id", apiKeyRecord.id);
+          try {
+            const { error: rpcErr } = await supabaseAdmin.rpc("increment_key_spend", {
+              key_id: apiKeyRecord.id,
+              amount: roundedCost,
+            });
+            if (rpcErr) {
+              console.warn("[ingest-edge] increment_key_spend RPC error:", rpcErr.message);
+            }
+          } catch (rpcErr) {
+            console.warn("[ingest-edge] increment_key_spend RPC exception:", rpcErr);
+          }
         } else {
           return NextResponse.json(
             { error: "Budget cap exceeded", action: "block_new_logs" },
@@ -19938,10 +19758,17 @@ export async function POST(req: NextRequest) {
           })().catch((err) => console.error("[budget-alerts] Non-blocking warning email dispatch error:", err));
         }
 
-        await supabaseAdmin
-          .from("api_keys")
-          .update({ current_period_spend_usd: newSpend })
-          .eq("id", apiKeyRecord.id);
+        try {
+          const { error: rpcErr } = await supabaseAdmin.rpc("increment_key_spend", {
+            key_id: apiKeyRecord.id,
+            amount: roundedCost,
+          });
+          if (rpcErr) {
+            console.warn("[ingest-edge] increment_key_spend RPC error:", rpcErr.message);
+          }
+        } catch (rpcErr) {
+          console.warn("[ingest-edge] increment_key_spend RPC exception:", rpcErr);
+        }
       }
     }
 

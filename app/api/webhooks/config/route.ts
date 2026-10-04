@@ -1,25 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
+import crypto from "crypto";
+import { createClient } from "@utils/supabase/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { isAllowedWebhookUrl } from "@/lib/webhooks";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// In-memory fallback cache for webhooks if table is initializing
+// In-memory fallback cache for webhooks if table is empty/missing
 const memoryWebhooks: Record<string, any[]> = {};
 
+const NO_CACHE_HEADERS = {
+  "Cache-Control": "no-store, max-age=0",
+  "CDN-Cache-Control": "no-store",
+  "Vercel-CDN-Cache-Control": "no-store",
+};
+
+// ----------------------------------------------------------------------
+// 1. GET HANDLER
+// ----------------------------------------------------------------------
 export async function GET(req: NextRequest) {
   const supabase = createClient();
   const {
     data: { user },
     error: authError,
   } = await supabase.auth.getUser();
-
-  const NO_CACHE_HEADERS = {
-    "Cache-Control": "no-store, max-age=0",
-    "CDN-Cache-Control": "no-store",
-    "Vercel-CDN-Cache-Control": "no-store",
-  };
 
   if (authError || !user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_CACHE_HEADERS });
@@ -29,22 +34,23 @@ export async function GET(req: NextRequest) {
     const { data, error } = await supabaseAdmin
       .from("webhook_configs")
       .select("*")
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+      .eq("user_id", user.id);
 
-    if (!error && data) {
-      return NextResponse.json({ success: true, webhooks: data }, { headers: NO_CACHE_HEADERS });
+    if (error) {
+      console.warn("webhook_configs fetch notice:", error.message);
+      const fallback = memoryWebhooks[user.id] || [];
+      return NextResponse.json({ data: fallback }, { headers: NO_CACHE_HEADERS });
     }
 
-    // Fallback
-    const userWebhooks = memoryWebhooks[user.id] || [];
-    return NextResponse.json({ success: true, webhooks: userWebhooks }, { headers: NO_CACHE_HEADERS });
+    return NextResponse.json({ data: data || [] }, { headers: NO_CACHE_HEADERS });
   } catch (err: any) {
-    console.warn("webhook config GET exception:", err);
-    return NextResponse.json({ success: true, webhooks: memoryWebhooks[user.id] || [] }, { headers: NO_CACHE_HEADERS });
+    return NextResponse.json({ error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
   }
 }
 
+// ----------------------------------------------------------------------
+// 2. POST HANDLER (With SSRF Protection & Crypto UUID)
+// ----------------------------------------------------------------------
 export async function POST(req: NextRequest) {
   const supabase = createClient();
   const {
@@ -52,81 +58,63 @@ export async function POST(req: NextRequest) {
     error: authError,
   } = await supabase.auth.getUser();
 
-  const NO_CACHE_HEADERS = {
-    "Cache-Control": "no-store, max-age=0",
-    "CDN-Cache-Control": "no-store",
-    "Vercel-CDN-Cache-Control": "no-store",
-  };
-
   if (authError || !user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_CACHE_HEADERS });
   }
 
   try {
     const body = await req.json();
-    const name = String(body.name || "Webhook Alert").trim();
-    const url = String(body.url || "").trim();
-    const type = body.type === "discord" ? "discord" : "slack";
-    const triggers = Array.isArray(body.triggers) ? body.triggers : ["budget_alert", "budget_exceeded"];
-    const isActive = body.is_active !== false;
+    const { url, type, name } = body;
 
-    if (!url) {
+    if (!url || !type || !name) {
+      return NextResponse.json({ error: "Missing required fields: url, type, name" }, { status: 400, headers: NO_CACHE_HEADERS });
+    }
+
+    // SSRF Protection Check
+    if (!isAllowedWebhookUrl(url, type)) {
       return NextResponse.json(
-        { error: "Bad Request: Target Webhook URL is required" },
+        { error: `Target URL must be a valid HTTPS ${type === "discord" ? "Discord" : "Slack"} webhook URL.` },
         { status: 400, headers: NO_CACHE_HEADERS }
       );
     }
 
-    const nowIso = new Date().toISOString();
-    const newConfig = {
-      id: "wh_" + Date.now() + "_" + Math.random().toString(36).substring(2, 7),
-      user_id: user.id,
-      name,
-      url,
-      type,
-      triggers,
-      is_active: isActive,
-      created_at: nowIso,
-    };
+    // Secure Crypto UUID generation
+    const newWebhookId = `wh_${crypto.randomUUID()}`;
 
-    // DB Insert
-    try {
-      const { data, error } = await supabaseAdmin
-        .from("webhook_configs")
-        .insert([newConfig])
-        .select()
-        .single();
+    const { data, error } = await supabaseAdmin
+      .from("webhook_configs")
+      .insert({
+        id: newWebhookId,
+        user_id: user.id,
+        url,
+        type,
+        name,
+        created_at: new Date().toISOString(),
+      })
+      .select()
+      .single();
 
-      if (!error && data) {
-        return NextResponse.json({ success: true, webhook: data }, { status: 201, headers: NO_CACHE_HEADERS });
-      }
-    } catch (err) {
-      console.warn("webhook_configs table insert notice:", err);
+    if (error) {
+      console.error("[webhooks/config] Create error:", error.message);
+      return NextResponse.json({ error: "Failed to create webhook" }, { status: 500, headers: NO_CACHE_HEADERS });
     }
 
-    // Memory fallback update
-    if (!memoryWebhooks[user.id]) memoryWebhooks[user.id] = [];
-    memoryWebhooks[user.id].unshift(newConfig);
-
-    return NextResponse.json({ success: true, webhook: newConfig }, { status: 201, headers: NO_CACHE_HEADERS });
+    return NextResponse.json({ success: true, data }, { headers: NO_CACHE_HEADERS });
   } catch (err: any) {
-    console.error("webhook config POST error:", err);
-    return NextResponse.json({ error: err.message }, { status: 500, headers: NO_CACHE_HEADERS });
+    console.error("[webhooks/config] Unexpected error during creation:", err);
+    return NextResponse.json({ error: "Internal server error" }, { status: 500, headers: NO_CACHE_HEADERS });
   }
 }
 
+// ----------------------------------------------------------------------
+// 3. DELETE HANDLER (Fixes IDOR Vulnerability)
+// ----------------------------------------------------------------------
 export async function DELETE(req: NextRequest) {
   const supabase = createClient();
   const {
     data: { user },
     error: authError,
   } = await supabase.auth.getUser();
-
-  const NO_CACHE_HEADERS = {
-    "Cache-Control": "no-store, max-age=0",
-    "CDN-Cache-Control": "no-store",
-    "Vercel-CDN-Cache-Control": "no-store",
-  };
 
   if (authError || !user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_CACHE_HEADERS });
@@ -136,16 +124,39 @@ export async function DELETE(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
 
-    if (!id) {
+    if (!id || typeof id !== "string" || !id.trim()) {
       return NextResponse.json({ error: "Missing webhook id" }, { status: 400, headers: NO_CACHE_HEADERS });
     }
 
+    // IDOR Fix: eq("user_id", user.id)
+    let deletedRow: { id: string } | null = null;
     try {
-      await supabaseAdmin.from("webhook_configs").delete().eq("id", id);
-    } catch {}
+      const { data, error } = await supabaseAdmin
+        .from("webhook_configs")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", user.id)
+        .select("id")
+        .maybeSingle();
 
+      if (error) {
+        console.warn("webhook_configs delete notice:", error.message);
+      } else {
+        deletedRow = data;
+      }
+    } catch (err) {
+      console.warn("webhook_configs delete exception:", err);
+    }
+
+    let deletedFromMemory = false;
     if (memoryWebhooks[user.id]) {
+      const before = memoryWebhooks[user.id].length;
       memoryWebhooks[user.id] = memoryWebhooks[user.id].filter((w) => w.id !== id);
+      deletedFromMemory = memoryWebhooks[user.id].length < before;
+    }
+
+    if (!deletedRow && !deletedFromMemory) {
+      return NextResponse.json({ error: "Webhook not found or access denied" }, { status: 404, headers: NO_CACHE_HEADERS });
     }
 
     return NextResponse.json({ success: true, deleted: id }, { headers: NO_CACHE_HEADERS });

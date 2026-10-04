@@ -27,8 +27,8 @@ export function formatSlackBlockKitPayload(payload: WebhookEventPayload): object
   const titleText = isExceeded
     ? "Meterix Alert: Budget Exceeded"
     : payload.event === "test_webhook"
-    ? "Meterix Webhook Test Notification"
-    : "Meterix Warning: Budget Threshold Approaching";
+      ? "Meterix Webhook Test Notification"
+      : "Meterix Warning: Budget Threshold Approaching";
 
   return {
     blocks: [
@@ -81,8 +81,8 @@ export function formatDiscordEmbedPayload(payload: WebhookEventPayload): object 
   const title = isExceeded
     ? "🚨 Meterix Alert: Budget Exceeded"
     : payload.event === "test_webhook"
-    ? "🧪 Meterix Webhook Test Notification"
-    : "⚠️ Meterix Warning: Budget Threshold Approaching";
+      ? "🧪 Meterix Webhook Test Notification"
+      : "⚠️ Meterix Warning: Budget Threshold Approaching";
 
   return {
     embeds: [
@@ -166,4 +166,29 @@ export async function dispatchWebhookAlert(payload: WebhookEventPayload): Promis
   }
 
   return { dispatched, failed };
+}
+const ALLOWED_WEBHOOK_HOSTS: Record<"slack" | "discord", string[]> = {
+  slack: ["hooks.slack.com"],
+  discord: ["discord.com", "discordapp.com"],
+};
+
+/**
+ * Validates that a webhook URL belongs to a genuine Slack or Discord endpoint.
+ * Protects against Server-Side Request Forgery (SSRF).
+ */
+export function isAllowedWebhookUrl(url: string, type: "slack" | "discord"): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+
+  // Must be HTTPS protocol
+  if (parsed.protocol !== "https:") return false;
+
+  const allowedHosts = ALLOWED_WEBHOOK_HOSTS[type] || [];
+  return allowedHosts.some(
+    (host) => parsed.hostname === host || parsed.hostname.endsWith(`.${host}`)
+  );
 }

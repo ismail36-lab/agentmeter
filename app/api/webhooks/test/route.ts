@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@/utils/supabase/server";
-import { formatSlackBlockKitPayload, formatDiscordEmbedPayload } from "@/lib/webhooks";
+import { createClient } from "@utils/supabase/server";
+import { formatSlackBlockKitPayload, formatDiscordEmbedPayload, isAllowedWebhookUrl } from "@/lib/webhooks";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+const NO_CACHE_HEADERS = {
+  "Cache-Control": "no-store, max-age=0",
+  "CDN-Cache-Control": "no-store",
+  "Vercel-CDN-Cache-Control": "no-store",
+};
 
 export async function POST(req: NextRequest) {
   const supabase = createClient();
@@ -11,12 +17,6 @@ export async function POST(req: NextRequest) {
     data: { user },
     error: authError,
   } = await supabase.auth.getUser();
-
-  const NO_CACHE_HEADERS = {
-    "Cache-Control": "no-store, max-age=0",
-    "CDN-Cache-Control": "no-store",
-    "Vercel-CDN-Cache-Control": "no-store",
-  };
 
   if (authError || !user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401, headers: NO_CACHE_HEADERS });
@@ -31,51 +31,49 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing webhook URL" }, { status: 400, headers: NO_CACHE_HEADERS });
     }
 
-    const testPayload = {
-      event: "test_webhook" as const,
-      apiKeyName: "Production Test Key",
-      currentSpend: 84.5,
-      budgetCap: 100.0,
-      userId: user.id,
-      message: "Test webhook alert dispatched successfully from Meterix Dashboard.",
-    };
+    // SSRF Protection Check
+    if (!isAllowedWebhookUrl(url, type)) {
+      return NextResponse.json(
+        { error: `Target URL must be a valid HTTPS ${type === "discord" ? "Discord" : "Slack"} webhook URL.` },
+        { status: 400, headers: NO_CACHE_HEADERS }
+      );
+    }
 
-    const formattedPayload =
-      type === "discord"
-        ? formatDiscordEmbedPayload(testPayload)
-        : formatSlackBlockKitPayload(testPayload);
+    const payload =
+      type === "slack"
+        ? formatSlackBlockKitPayload({
+          event: "test_webhook",
+          apiKeyName: "Test Key",
+          currentSpend: 0,
+          budgetCap: 100,
+          message: "This is a test notification from Meterix.",
+        })
+        : formatDiscordEmbedPayload({
+          event: "test_webhook",
+          apiKeyName: "Test Key",
+          currentSpend: 0,
+          budgetCap: 100,
+          message: "This is a test notification from Meterix.",
+        });
 
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(formattedPayload),
+      body: JSON.stringify(payload),
     });
 
-    if (res.ok) {
+    if (!res.ok) {
+      const errText = await res.text();
       return NextResponse.json(
-        {
-          success: true,
-          status: res.status,
-          message: `Test notification sent successfully to ${type.toUpperCase()} target!`,
-        },
-        { headers: NO_CACHE_HEADERS }
-      );
-    } else {
-      const text = await res.text();
-      return NextResponse.json(
-        {
-          success: false,
-          status: res.status,
-          error: `Target server returned status ${res.status}`,
-          details: text,
-        },
+        { error: `Webhook endpoint returned status ${res.status}`, details: errText },
         { status: 400, headers: NO_CACHE_HEADERS }
       );
     }
+
+    return NextResponse.json({ success: true }, { headers: NO_CACHE_HEADERS });
   } catch (err: any) {
-    console.error("Test Webhook Error:", err);
     return NextResponse.json(
-      { success: false, error: "Connection Failed", details: err.message || String(err) },
+      { error: err.message || "Failed to send test webhook" },
       { status: 500, headers: NO_CACHE_HEADERS }
     );
   }
