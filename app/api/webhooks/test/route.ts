@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@utils/supabase/server";
+import { createClient } from "@/utils/supabase/server";
 import { formatSlackBlockKitPayload, formatDiscordEmbedPayload, isAllowedWebhookUrl } from "@/lib/webhooks";
 
 export const dynamic = "force-dynamic";
