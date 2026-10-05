@@ -32,7 +32,7 @@ export interface CustomerMarginItem {
   total_cost: number;
   margin: number;
   margin_percentage: number;
-  status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account";
+  status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account" | "free_tier_usage";
   log_count: number;
   last_synced_at: string;
 }
@@ -490,6 +490,11 @@ export function CustomerProfitability() {
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-rose-500/15 text-rose-400 border border-rose-500/30 font-sans">
                         <AlertCircle className="h-3 w-3" />
                         Unprofitable
+                      </span>
+                    ) : cust.status === "free_tier_usage" ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-zinc-500/15 text-zinc-300 border border-zinc-500/30 font-sans">
+                        <HelpCircle className="h-3 w-3 text-zinc-300" />
+                        Free Tier &mdash; No Revenue Expected
                       </span>
                     ) : cust.status === "low_margin" ? (
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30 font-sans">

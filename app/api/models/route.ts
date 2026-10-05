@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getActiveModels } from "@/lib/model-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -22,20 +23,7 @@ export async function OPTIONS() {
  */
 export async function GET() {
   try {
-    const { data, error } = await supabaseAdmin
-      .from("model_pricing")
-      .select("model_name, provider, input_price_per_million, output_price_per_million, is_active")
-      .eq("is_active", true)
-      .order("provider", { ascending: true })
-      .order("model_name", { ascending: true });
-
-    if (error) {
-      console.error("GET /api/models error:", error.message);
-      return NextResponse.json(
-        { error: error.message, models: [] },
-        { status: 500, headers: getCorsHeaders() }
-      );
-    }
+    const data = await getActiveModels();
 
     return NextResponse.json(
       { models: data ?? [] },

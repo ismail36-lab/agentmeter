@@ -15,7 +15,7 @@ export interface CustomerMarginItem {
   total_cost: number;
   margin: number;
   margin_percentage: number;
-  status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account";
+  status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account" | "free_tier_usage";
   log_count: number;
   last_synced_at: string;
 }
@@ -148,9 +148,11 @@ export async function calculateSingleCustomerMargin(
     marginPercentage = -100;
   }
 
-  let status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account" = "profitable";
+  let status: "unprofitable" | "low_margin" | "profitable" | "no_data" | "new_account" | "free_tier_usage" = "profitable";
   if (revenue === 0 && roundedTotalCost === 0) {
     status = "no_data";
+  } else if (plan === "free" && revenue === 0 && roundedTotalCost > 0) {
+    status = "free_tier_usage";
   } else if (margin < 0) {
     status = "unprofitable";
   } else if (marginPercentage < 30 || margin < 10) {

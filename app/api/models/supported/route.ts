@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase/admin";
+import { getActiveModels } from "@/lib/model-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -34,14 +35,11 @@ export async function GET() {
   };
 
   try {
-    const { data, error } = await supabaseAdmin
-      .from("model_pricing")
-      .select("model_name")
-      .eq("is_active", true)
-      .order("model_name", { ascending: true });
-
-    if (error) {
-      console.error("[models/supported] DB error:", error.message);
+    let data;
+    try {
+      data = await getActiveModels();
+    } catch (err: any) {
+      console.error("[models/supported] DB error:", err.message);
       const fallbackModels = ["gpt-4o", "gpt-4o-mini", "claude-3-5-sonnet"];
       return NextResponse.json(
         {

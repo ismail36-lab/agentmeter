@@ -1148,9 +1148,15 @@ export default function Dashboard() {
                   </span>
                 )}
               </div>
-              <p className="text-xs text-zinc-400 mt-0.5 font-sans">
-                Automatic prompt caching discounts applied to repetitive system prompts &amp; context headers
-              </p>
+              {cachingMetrics.totalCachedTokens > 0 ? (
+                <p className="text-xs text-zinc-400 mt-0.5 font-sans">
+                  Automatic prompt caching discounts applied to repetitive system prompts &amp; context headers
+                </p>
+              ) : (
+                <p className="text-xs text-indigo-300/70 mt-0.5 font-sans">
+                  No cached tokens yet. Send <code className="text-[10px] bg-indigo-900/30 px-1 rounded border border-indigo-500/20">cached_tokens</code> in your telemetry payload to start tracking savings here.
+                </p>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-6 font-mono text-xs shrink-0 self-end sm:self-auto">
